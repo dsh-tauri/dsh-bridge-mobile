@@ -108,8 +108,9 @@ Clean-checkout 检查暴露了仅靠被忽略的 Expo 生成类型声明才能�
 
 ### APK 与发布
 
-- [ ] 经批准推送后运行真实 Ubuntu CI/Release；确认 Gradle、原生模块与 SDK 版本实际编译成功。
-- [ ] 四个 signing secrets 的全有、全无、部分配置；校验证书、zipalign、checksum、版本、APK 包名与资产。
+- [x] 经批准推送后运行真实 Ubuntu CI/Release；确认 Gradle、原生模块与 SDK 版本实际编译成功。
+- [x] 无 signing secrets 的开发签名路径：APK v2 签名验证、16 KB zipalign 检查、checksum、版本、包名、预发布标记与资产全部通过。
+- [ ] 四个 signing secrets 的全有、部分配置，以及正式证书路径的真实运行验收。
 - [ ] 真机检查 16 KB page size 兼容；`zipalign -P 16` 不是全部 ELF/runtime 兼容性的证明。
 - [ ] 正式签名更新、开发签名切换卸载提醒、同标签重新上传的 notes/prerelease/资产一致性。
 - [ ] iOS 发布 TODO；本轮无 iOS CI、ATS/local-network 权限或发行验收。
@@ -121,7 +122,11 @@ Clean-checkout 检查暴露了仅靠被忽略的 Expo 生成类型声明才能�
 - 发布前复验：typecheck、零警告 lint、随机 seed `100301` 的 469/469 测试通过。
 - 首次提交 `644948e` 已推送到 `main`。[首次 Ubuntu CI](https://github.com/dsh-tauri/dsh-bridge-mobile/actions/runs/37062026233) 全部通过，包含安装、Expo 兼容、typecheck、lint、普通/随机测试、export 与 prebuild。
 - 用户随后明确优先完成 Release APK，本地 SDK 留待发布后处理。本轮停止本地 SDK 安装与中转方案，未创建 SDK artifact；仅远端 Release job 安装必要工具。Android command-line tools 固定 `16.0` / `12266719`，与 JDK 17 配对。
-- 原生 APK 发布：[Actions](https://github.com/dsh-tauri/dsh-bridge-mobile/actions)、[Releases](https://github.com/dsh-tauri/dsh-bridge-mobile/releases)；继续跟进实际结果，不提前宣称 APK 成功。
+- Release 工具链调整提交 `4917467` 已推送，标签 `v0.1.0` 指向该提交。[对应 CI](https://github.com/dsh-tauri/dsh-bridge-mobile/actions/runs/37063330514) 全部通过。
+- [首次原生 APK Release](https://github.com/dsh-tauri/dsh-bridge-mobile/actions/runs/37063335612) 的 build 与 publish 全部成功；Gradle 输出 `BUILD SUCCESSFUL in 36m 45s`。版本校验、依赖安装、Expo 兼容、typecheck、lint、469 项随机测试、Android 工具安装、prebuild、原生编译、签名/对齐验证和 Release 上传均通过。
+- [v0.1.0 Release](https://github.com/dsh-tauri/dsh-bridge-mobile/releases/tag/v0.1.0) 于 `2026-10-02T21:30:52Z` 发布（北京时间 2026-10-03 05:30:52），为非 draft 的开发签名 prerelease。仓库私有，下载需访问权限。
+- [APK](https://github.com/dsh-tauri/dsh-bridge-mobile/releases/download/v0.1.0/dsh-bridge-v0.1.0-android.apk) 大小 `103110816` bytes；[SHA256SUMS.txt](https://github.com/dsh-tauri/dsh-bridge-mobile/releases/download/v0.1.0/SHA256SUMS.txt) 与实际下载 APK 的 SHA-256 均为 `b7300f89e6c05388409c136afdc0d27ebff4a3cb58ab9232c52540ab64360d9f`，也与 GitHub asset digest 一致。
+- `apksigner verify --verbose` 通过，v2 scheme 为 true、signer 数为 1；`zipalign -c -P 16 4` 通过。APK metadata：包名 `com.dshtauri.dshbridge`、versionName `0.1.0`、versionCode `1`、minSdk `24`、target/compileSdk `36`、ABI `arm64-v8a` / `armeabi-v7a` / `x86_64`。
 - 真机验收仍未执行；远端编译、签名/对齐验证与设备行为分开记录。
 
 本地成果和规范见 [README](../README.md) 与 [开发规则](../AGENTS.md)。
