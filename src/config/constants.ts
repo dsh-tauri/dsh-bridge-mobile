@@ -7,7 +7,6 @@ export const SCAN_BUDGET_MS = 20000
 export const HEALTH_INTERVAL_MS = 15000
 export const HISTORY_LIMIT = 20
 export const RECENT_LIMIT = 5
-export const SWIPE_EDGE_WIDTH = 56
 export const WEBVIEW_LOAD_TIMEOUT_MS = 20000
 export const FOCUS_RETRY_INTERVAL_MS = 200
 export const FOCUS_TIMEOUT_MS = 15000

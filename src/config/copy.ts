@@ -6,6 +6,7 @@ export const copy = {
   autoScan: '自动扫描',
   scanQr: '扫码连接',
   recentConnections: '最近连接',
+  refreshConnections: '刷新最近连接',
   connectionInfo: '连接信息',
   currentConnection: '当前连接',
   noConnection: '尚未连接',

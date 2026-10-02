@@ -129,11 +129,21 @@ jobs:
           else
             cp "$source" "$destination"
           fi
-          "$tools/apksigner" verify --verbose "$destination"
+          "$tools/apksigner" verify --verbose --print-certs "$destination"
           "$tools/aapt" dump badging "$destination"
+          node <<'NODE'
+          const fs = require('node:fs');
+          const { execFileSync } = require('node:child_process');
+          const apk = `release/dsh-bridge-${process.env.RELEASE_TAG}-android.apk`;
+          const config = JSON.parse(execFileSync('unzip', ['-p', apk, 'assets/app.config'], { encoding: 'utf8' }));
+          const notice = fs.readFileSync('THIRD_PARTY_NOTICES.md', 'utf8');
+          if (config.extra?.thirdPartyNotices !== notice) throw new Error('APK is missing the complete artwork notice');
+          console.log('APK includes the complete artwork notice.');
+          NODE
+          cp THIRD_PARTY_NOTICES.md release/THIRD_PARTY_NOTICES.md
           (
             cd release
-            sha256sum ./*.apk > SHA256SUMS.txt
+            sha256sum ./*.apk ./THIRD_PARTY_NOTICES.md > SHA256SUMS.txt
           )
       - uses: actions/upload-artifact@v7
         with:
@@ -168,7 +178,7 @@ jobs:
             else
               printf 'This APK is signed with the configured release key.\n\n'
             fi
-            printf 'See SHA256SUMS.txt for artifact checksums.\n'
+            printf 'See SHA256SUMS.txt for artifact checksums. THIRD_PARTY_NOTICES.md is included here and embedded in the APK.\n'
           } > release-notes.md
           flags=(--prerelease=false)
           if [[ "$PRERELEASE" == 'true' || "$SIGNING_MODE" == 'debug' ]]; then flags=(--prerelease); fi
@@ -177,4 +187,4 @@ jobs:
           else
             gh release create "$RELEASE_TAG" --verify-tag --title "DSH Bridge $RELEASE_TAG" --notes-file release-notes.md "${flags[@]}"
           fi
-          gh release upload "$RELEASE_TAG" release/*.apk release/SHA256SUMS.txt --clobber
+          gh release upload "$RELEASE_TAG" release/*.apk release/SHA256SUMS.txt release/THIRD_PARTY_NOTICES.md --clobber

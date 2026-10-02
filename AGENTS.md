@@ -19,7 +19,7 @@
 
 ## UI and Effects
 
-- Use semantic HeroUI tokens. Desktop neutrals are the source for light/dark theme mapping; the whale artwork stays black on a white tile.
+- Use semantic HeroUI tokens. Desktop neutrals are the source for light/dark theme mapping. The landing brand uses the original DSH SVG paths in three centered vertical rows: transparent whale, DeepSeek, Harness; fills adapt to the theme.
 - React Compiler is enabled. Do not use `useMemo` or `useCallback`.
 - Named functions use `function` declarations. Arrow functions are for callbacks.
 - JSX conditional rendering uses `If`, `Then`, `Else`; no ternary or `&&` conditional elements.

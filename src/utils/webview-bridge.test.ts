@@ -632,6 +632,65 @@ describe('authenticated document readiness', () => {
     expect(parseNativeMessage(browser.posts.mock.calls[0]![0], nativeUrl, origin, nonce)).toEqual({ type: 'dsh://bridge-ready' })
   })
 
+  it('rechecks a later DSH fingerprint on same-nonce reinjection without replacing the shim or sending readiness twice', () => {
+    const browser = createBrowser()
+    const Notification = browser.inject()
+    const listenerCount = vi.mocked(browser.window.addEventListener).mock.calls.length
+    expect(browser.posts).not.toHaveBeenCalled()
+    browser.window.__DSH_BOOT__ = {}
+
+    expect(browser.inject()).toBe(Notification)
+    browser.inject()
+
+    expect(browser.posts).toHaveBeenCalledTimes(1)
+    expect(parseNativeMessage(browser.posts.mock.calls[0]![0], nativeUrl, origin, nonce)).toEqual({ type: 'dsh://bridge-ready' })
+    expect(browser.window.addEventListener).toHaveBeenCalledTimes(listenerCount)
+  })
+
+  it('does not declare readiness on reinjection while the verified document is still loading', () => {
+    const browser = createBrowser({ readyState: 'loading' })
+    browser.inject()
+    browser.window.__dshClientCtx = {}
+    browser.inject()
+    expect(browser.posts).not.toHaveBeenCalled()
+    browser.document.readyState = 'complete'
+    browser.window.dispatchEvent(new Event('load'))
+    browser.inject()
+
+    expect(browser.posts).toHaveBeenCalledTimes(1)
+    expect(parseNativeMessage(browser.posts.mock.calls[0]![0], nativeUrl, origin, nonce)).toEqual({ type: 'dsh://bridge-ready' })
+  })
+
+  it('retries readiness when the native message endpoint was absent during the first verified injection', () => {
+    const browser = createBrowser()
+    browser.window.__DSH_BOOT__ = {}
+    browser.window.ReactNativeWebView = undefined
+    const Notification = browser.inject()
+    expect(browser.posts).not.toHaveBeenCalled()
+    browser.window.ReactNativeWebView = { postMessage: browser.posts }
+
+    expect(browser.inject()).toBe(Notification)
+    browser.inject()
+
+    expect(browser.posts).toHaveBeenCalledTimes(1)
+    expect(parseNativeMessage(browser.posts.mock.calls[0]![0], nativeUrl, origin, nonce)).toEqual({ type: 'dsh://bridge-ready' })
+  })
+
+  it.each(['origin', 'frame'] as const)('still rejects reinjection when the current %s is no longer trusted', (boundary) => {
+    const browser = createBrowser()
+    const Notification = browser.inject()
+    browser.window.__DSH_BOOT__ = {}
+    if (boundary === 'origin')
+      browser.location.origin = 'https://foreign.test'
+    else
+      browser.window.top = {}
+
+    expect(browser.run(createNotificationShim(origin, nonce))).toBe(true)
+
+    expect(browser.window.Notification).toBe(Notification)
+    expect(browser.posts).not.toHaveBeenCalled()
+  })
+
   it('waits for document completion rather than native load-finish when injected before page content', () => {
     const browser = createBrowser({ readyState: 'loading' })
     browser.window.__DSH_BOOT__ = {}

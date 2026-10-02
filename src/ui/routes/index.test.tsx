@@ -19,6 +19,8 @@ const native = vi.hoisted(() => ({
   setNotificationChannelAsync: vi.fn<(...args: unknown[]) => Promise<null>>(),
   scheduleNotificationAsync: vi.fn<(...args: unknown[]) => Promise<string>>(),
   cancelAnimation: vi.fn(),
+  dimensions: { width: 440, height: 900 },
+  theme: { 'background': '#ffffff', 'foreground': '#0f1115', 'accent-foreground': '#ffffff' } as Record<string, string>,
 }))
 
 vi.mock('react-native', () => ({
@@ -29,7 +31,7 @@ vi.mock('react-native', () => ({
   Pressable: 'Pressable',
   Platform: { OS: 'android' },
   Linking: { openURL: vi.fn(async () => {}) },
-  useWindowDimensions: () => ({ width: 440, height: 900 }),
+  useWindowDimensions: () => native.dimensions,
   AppState: {
     get currentState() { return native.appState.currentState },
     addEventListener: (_event: string, listener: () => void) => {
@@ -58,7 +60,14 @@ vi.mock('expo-notifications', () => ({
   setNotificationChannelAsync: native.setNotificationChannelAsync,
   scheduleNotificationAsync: native.scheduleNotificationAsync,
 }))
-vi.mock('heroui-native/hooks', () => ({ useThemeColor: (names: string[]) => names.map(() => '#ffffff') }))
+vi.mock('heroui-native/hooks', () => ({
+  useThemeColor: (names: string | string[]) => {
+    if (Array.isArray(names))
+      return names.map(name => native.theme[name] ?? '#ffffff')
+    return native.theme[names] ?? '#ffffff'
+  },
+}))
+vi.mock('react-native-svg', () => ({ default: 'Svg', Path: 'SvgPath', Rect: 'SvgRect', G: 'SvgGroup', Defs: 'SvgDefs', ClipPath: 'SvgClipPath' }))
 vi.mock('heroui-native/button', async () => {
   const { createElement } = await import('react')
   function Button({ children, ...props }: { children?: ReactNode }) {
@@ -67,7 +76,7 @@ vi.mock('heroui-native/button', async () => {
   return { Button: Object.assign(Button, { Label: 'Text' }) }
 })
 vi.mock('react-native-safe-area-context', () => ({ SafeAreaView: 'SafeAreaView' }))
-vi.mock('react-native-lucide', () => ({ History: 'Icon', QrCode: 'Icon', RefreshCw: 'Icon', X: 'Icon', ArrowLeft: 'Icon', Hand: 'Icon', PanelRightOpen: 'Icon' }))
+vi.mock('react-native-lucide', () => ({ History: 'HistoryIcon', Radar: 'RadarIcon', QrCode: 'QrCodeIcon', ScanLine: 'ScanLineIcon', RefreshCw: 'RefreshIcon', X: 'Icon', ArrowLeft: 'Icon', Hand: 'Icon', PanelRightOpen: 'Icon' }))
 vi.mock('react-native-reanimated', async () => {
   const { useRef } = await import('react')
   return {
@@ -211,6 +220,8 @@ beforeEach(async () => {
     originalError(...args)
   })
   native.appState.currentState = 'active'
+  native.dimensions = { width: 440, height: 900 }
+  native.theme = { 'background': '#ffffff', 'foreground': '#0f1115', 'accent-foreground': '#ffffff' }
   native.appListeners.clear()
   native.backListeners.clear()
   native.navigation.isFocused.mockReturnValue(true)
@@ -309,6 +320,76 @@ describe('rendered Home scanning and idle actions', () => {
     expect(button('自动扫描').props.isDisabled).toBe(false)
   })
 
+  it('uses a scanning-frame icon rather than a QR-code image at both scanner entry points', async () => {
+    hydrate()
+    connection.cancelScan()
+    await mount()
+    expect(button('扫码连接').findAll(node => String(node.type) === 'ScanLineIcon')).toHaveLength(1)
+    expect(root().findAll(node => String(node.type) === 'QrCodeIcon')).toHaveLength(0)
+
+    await press('最近连接')
+
+    expect(button('扫码连接').findAll(node => String(node.type) === 'ScanLineIcon')).toHaveLength(1)
+    expect(root().findAll(node => String(node.type) === 'QrCodeIcon')).toHaveLength(0)
+  })
+
+  it('matches the two outlined connection actions and gives auto-scan a contrasting radar icon', async () => {
+    hydrate()
+    connection.cancelScan()
+    await mount()
+
+    expect(button('扫码连接').props).toMatchObject({ variant: 'outline', size: 'lg' })
+    expect(button('最近连接').props).toMatchObject({ variant: 'outline', size: 'lg' })
+    expect(button('自动扫描').find(node => String(node.type) === 'RadarIcon').props).toMatchObject({ size: 20, color: '#ffffff' })
+    expect(button('最近连接').findAll(node => String(node.type) === 'HistoryIcon')).toHaveLength(1)
+
+    native.theme = { 'background': '#151517', 'foreground': '#f9fafb', 'accent-foreground': '#0f1115' }
+    await act(async () => {
+      screen!.update(createElement(HomeScreen))
+    })
+
+    expect(button('自动扫描').find(node => String(node.type) === 'RadarIcon').props.color).toBe('#0f1115')
+    expect(button('扫码连接').findAll(node => String(node.type) === 'ScanLineIcon').map(node => node.props.color)).toEqual(['#f9fafb'])
+  })
+
+  it('renders the original whale, DeepSeek and Harness as three centered transparent SVG rows in both themes', async () => {
+    hydrate()
+    await mount()
+
+    const logos = root().findAll(node => String(node.type) === 'Svg')
+    expect(logos.map(node => node.props.accessibilityLabel)).toEqual(['DSH Bridge', 'DeepSeek', 'Harness'])
+    expect(logos.map(node => node.props.viewBox)).toEqual(['0 0 23.16 17.04', '26 4.5 96 17.5', '129.348 5.5 52 14'])
+    const brand = root().find(node => String(node.type) === 'View' && node.props.className === 'items-center gap-3')
+    expect(brand.findAll(node => String(node.type) === 'Svg')).toEqual(logos)
+    expect(root().findAll(node => String(node.type) === 'Image')).toHaveLength(0)
+    expect(logos[0]!.findAll(node => String(node.type) === 'SvgRect')).toHaveLength(0)
+    expect(logos[0]!.find(node => String(node.type) === 'SvgPath').props.fill).toBe('#0f1115')
+    expect(logos[1]!.findAll(node => String(node.type) === 'SvgPath')).toHaveLength(9)
+    expect(logos[1]!.findAll(node => String(node.type) === 'SvgPath').every(node => node.props.fill === '#0f1115')).toBe(true)
+    expect(logos[2]!.findAll(node => String(node.type) === 'SvgPath')).toHaveLength(7)
+    expect(logos[2]!.findAll(node => String(node.type) === 'SvgPath').every(node => node.props.fill === '#ffffff')).toBe(true)
+    expect(texts()).not.toContain('DeepSeek')
+    expect(texts()).not.toContain('Harness')
+
+    native.theme = { 'background': '#151517', 'foreground': '#f9fafb', 'accent-foreground': '#0f1115' }
+    await act(async () => {
+      connection.cancelScan()
+    })
+
+    const idleLogos = root().findAll(node => String(node.type) === 'Svg')
+    expect(idleLogos.map(node => node.props.accessibilityLabel)).toEqual(['DSH Bridge', 'DeepSeek', 'Harness'])
+    expect(idleLogos[0]!.find(node => String(node.type) === 'SvgPath').props.fill).toBe('#f9fafb')
+    expect(idleLogos[1]!.findAll(node => String(node.type) === 'SvgPath').every(node => node.props.fill === '#f9fafb')).toBe(true)
+    expect(idleLogos[2]!.findAll(node => String(node.type) === 'SvgPath').every(node => node.props.fill === '#151517')).toBe(true)
+
+    await act(async () => {
+      runtime.connectAddress(alpha)
+    })
+
+    expect(root().findAll(node => String(node.type) === 'Svg')).toHaveLength(0)
+    expect(webView().props.source).toEqual({ uri: 'http://one.local:3080/tasks?auth=saved-token' })
+  })
+
   it('opens the QR route from the idle scan action', async () => {
     hydrate()
     connection.cancelScan()
@@ -323,14 +404,20 @@ describe('rendered Home scanning and idle actions', () => {
 })
 
 describe('rendered Home connection drawer', () => {
-  it('uses the right slide drawer with a 56-point edge and presents only five recent hosts with their status', async () => {
+  it('uses the right slide drawer across the whole page and presents only five recent hosts with accessible status', async () => {
     hydrate(history)
     connection.cancelScan()
     connection.setHealth('http://one.local:3080', 'available')
     connection.setHealth('http://two.local:3080', 'unavailable')
     holdNetwork()
     await mount()
-    expect(drawer().props).toMatchObject({ drawerPosition: 'right', drawerType: 'slide', direction: 'ltr', swipeEdgeWidth: 56, drawerStyle: { width: 384 } })
+    expect(drawer().props).toMatchObject({ drawerPosition: 'right', drawerType: 'slide', direction: 'ltr', swipeEdgeWidth: 440, drawerStyle: { width: 384 } })
+    native.dimensions = { width: 320, height: 640 }
+    await act(async () => {
+      screen!.update(createElement(HomeScreen))
+    })
+    expect(drawer().props.swipeEdgeWidth).toBe(320)
+    expect(drawer().props.drawerStyle.width).toBeCloseTo(281.6)
 
     await press('最近连接')
 
@@ -347,6 +434,67 @@ describe('rendered Home connection drawer', () => {
     expect(texts()).not.toContain('seven.local:3080')
     expect(button('断开连接').props.isDisabled).toBe(true)
     expect(button('重新连接').props.isDisabled).toBe(true)
+  })
+
+  it('uses the same title-and-item style for current and recent hosts with only status dots in the rows', async () => {
+    hydrate(history)
+    runtime.connectAddress(alpha)
+    holdNetwork()
+    await mount()
+    await act(async () => {
+      drawer().props.onOpen()
+    })
+
+    expect(texts()).toContain('当前连接')
+    expect(texts()).toContain('最近连接')
+    const current = button('重新连接')
+    const recent = button('one.local:3080，可用')
+    expect(current.props.variant).toBe('ghost')
+    expect(current.props.className).toBe(recent.props.className)
+    expect(text(current)).toBe('one.local:3080')
+    expect(text(recent)).toBe('one.local:3080')
+    expect(current.findAll(node => String(node.type) === 'View' && node.props.className?.includes('bg-success'))).toHaveLength(1)
+    expect(recent.findAll(node => String(node.type) === 'View' && node.props.className?.includes('bg-success'))).toHaveLength(1)
+    expect(texts()).not.toContain('可用')
+    expect(texts()).not.toContain('不可用')
+    expect(root().findAll(node => String(node.type) === 'View' && node.props.className?.includes('border-border') && node.props.className?.includes('bg-surface-secondary'))).toHaveLength(0)
+    const refresh = button('刷新最近连接')
+    expect(root().findAll(node => String(node.type) === 'RefreshIcon')).toEqual(refresh.findAll(node => String(node.type) === 'RefreshIcon'))
+
+    await press('重新连接')
+
+    expect(drawer().props.open).toBe(false)
+    expect(connection.viewGeneration).toBe(2)
+    expect(webView().props.source).toEqual({ uri: 'http://one.local:3080/tasks?auth=saved-token' })
+  })
+
+  it('refreshes host availability from the recent header without reconnecting or duplicating active probes', async () => {
+    hydrate(history.slice(0, 1))
+    connection.cancelScan()
+    await mount()
+    await press('最近连接')
+    expect(button('one.local:3080，可用').props.isDisabled).not.toBe(true)
+    expect(native.fetch).toHaveBeenCalledTimes(1)
+    const refresh = button('刷新最近连接')
+    expect(refresh.props).toMatchObject({ variant: 'ghost', isIconOnly: true })
+    const header = root().findAll(node => String(node.type) === 'View' && node.props.className === 'flex-row items-center justify-between').find(node => node.findAll(child => String(child.type) === 'Text').map(text).includes('最近连接'))
+    expect(header?.findAll(node => String(node.type) === 'RefreshIcon')).toHaveLength(1)
+    expect(button('one.local:3080，可用').findAll(node => String(node.type) === 'RefreshIcon')).toHaveLength(0)
+
+    native.fetch.mockResolvedValue(new Response(null, { status: 503 }))
+    await press('刷新最近连接')
+
+    expect(native.fetch).toHaveBeenCalledTimes(2)
+    expect(button('one.local:3080，不可用').findAll(node => String(node.type) === 'View' && node.props.className?.includes('bg-danger'))).toHaveLength(1)
+    expect(texts()).not.toContain('不可用')
+    expect(connection.current).toBeNull()
+    expect(drawer().props.open).toBe(true)
+    holdNetwork()
+    await press('刷新最近连接')
+    await press('刷新最近连接')
+    expect(native.fetch).toHaveBeenCalledTimes(3)
+    expect(native.fetch.mock.calls[2]![0]).toBe('http://one.local:3080/__dsh_bridge__/auth-status')
+    expect(connection.viewGeneration).toBe(0)
   })
 
   it('connects a tapped recent host using its saved token and closes the drawer', async () => {

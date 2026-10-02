@@ -89,7 +89,13 @@ vi.mock('expo-camera', () => ({
   useCameraPermissions: () => [{ granted: true, canAskAgain: true }, vi.fn(async () => ({})), refreshCameraPermission],
 }))
 vi.mock('heroui-native/provider', () => ({ HeroUINativeProvider: 'HeroUINativeProvider' }))
-vi.mock('heroui-native/hooks', () => ({ useThemeColor: (names: string[]) => names.map(() => '#ffffff') }))
+vi.mock('heroui-native/hooks', () => ({
+  useThemeColor: (names: string | string[]) => {
+    if (Array.isArray(names))
+      return names.map(() => '#ffffff')
+    return '#ffffff'
+  },
+}))
 vi.mock('heroui-native/button', async () => {
   const { createElement } = await import('react')
   function Button({ children, ...props }: { children?: ReactNode }) {
@@ -99,7 +105,8 @@ vi.mock('heroui-native/button', async () => {
 })
 vi.mock('react-native-gesture-handler', () => ({ GestureHandlerRootView: 'GestureHandlerRootView' }))
 vi.mock('react-native-safe-area-context', () => ({ SafeAreaProvider: 'SafeAreaProvider', SafeAreaView: 'SafeAreaView' }))
-vi.mock('react-native-lucide', () => ({ History: 'Icon', QrCode: 'Icon', RefreshCw: 'Icon', X: 'Icon', ArrowLeft: 'Icon', Hand: 'Icon', PanelRightOpen: 'Icon' }))
+vi.mock('react-native-lucide', () => ({ History: 'Icon', Radar: 'Icon', ScanLine: 'Icon', RefreshCw: 'Icon', X: 'Icon', ArrowLeft: 'Icon', Hand: 'Icon', PanelRightOpen: 'Icon' }))
+vi.mock('react-native-svg', () => ({ default: 'Svg', Path: 'SvgPath', Rect: 'SvgRect', G: 'SvgGroup', Defs: 'SvgDefs', ClipPath: 'SvgClipPath' }))
 vi.mock('react-native', () => ({
   View: 'View',
   Text: 'Text',

@@ -29,6 +29,7 @@ export function BridgeWebView({ address, generation }: { address: BridgeAddress,
   const canGoBackRef = useRef(false)
   const focusRequestRef = useRef<{ requestId: string, focus: NotificationFocus } | null>(null)
   const [documentReady, setDocumentReady] = useState(false)
+  const [documentGeneration, setDocumentGeneration] = useState(0)
   const state = useStore(connection)
   const navigation = useNavigation()
   const appState = useAppState()
@@ -67,11 +68,11 @@ export function BridgeWebView({ address, generation }: { address: BridgeAddress,
   }, [address.id, appState, documentReady, nonce, state.loadError, state.pendingFocus, state.focusGeneration])
   // keep:effect Bound a silent or non-DSH WebView load without mistaking Android's finish event for success.
   useEffect(() => {
-    if (!state.loading)
+    if (documentReady || state.loadError)
       return
     const timeout = setTimeout(() => connection.markLoadFailed(generation, copy.connectionFailed), WEBVIEW_LOAD_TIMEOUT_MS)
     return () => clearTimeout(timeout)
-  }, [generation, state.loading])
+  }, [documentGeneration, documentReady, generation, state.loadError])
   // keep:effect Route Android back to WebView history without consuming an open drawer's back event.
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -132,12 +133,15 @@ export function BridgeWebView({ address, generation }: { address: BridgeAddress,
     }
     void sendNativeNotification(message, address.id)
   }
-  function loadingStarted(url: string) {
+  function loadingStarted(url: string, loading: boolean) {
     if (generation !== connection.viewGeneration || !isTrustedOrigin(url, address.id))
       return
     mainUrlRef.current = url
+    if (!loading)
+      return
     focusRequestRef.current = null
     setDocumentReady(false)
+    setDocumentGeneration(value => value + 1)
   }
   function loaded(url: string) {
     if (isTrustedOrigin(url, address.id))
@@ -170,11 +174,11 @@ export function BridgeWebView({ address, generation }: { address: BridgeAddress,
           originWhitelist={['*']}
           onShouldStartLoadWithRequest={allowNavigation}
           onMessage={handleMessage}
-          onLoadStart={event => loadingStarted(event.nativeEvent.url)}
+          onLoadStart={event => loadingStarted(event.nativeEvent.url, event.nativeEvent.loading)}
           onLoad={event => loaded(event.nativeEvent.url)}
           onError={() => connection.markLoadFailed(generation, copy.connectionFailed)}
           onHttpError={({ nativeEvent }) => {
-            if (nativeEvent.statusCode >= 400 && nativeEvent.url === mainUrlRef.current)
+            if (nativeEvent.statusCode >= 400 && nativeEvent.statusCode !== 401 && nativeEvent.url === mainUrlRef.current)
               connection.markLoadFailed(generation, copy.connectionFailed)
           }}
           onNavigationStateChange={(navigation) => {

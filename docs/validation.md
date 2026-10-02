@@ -80,15 +80,109 @@ Clean-checkout 检查暴露了仅靠被忽略的 Expo 生成类型声明才能�
 
 详细输出与可重跑脚本保留在本地被忽略的临时目录：[mutation-results.json](../.temp/mutation-results.json)、[mutation-check.mjs](../.temp/mutation-check.mjs)。原始临时证据不属于远端源码交付。
 
+## 连接失败与扫码图标修复（2026-10-03，尚未发布）
+
+用户反馈地址正确、浏览器可访问，但 APP 显示连接失败且抽屉仍显示可用。主机公开探测成功与 WebView 文档就绪是两条不同链路，不能根据绿点证明页面已经加载成功。以下为生产代码的确定性回归结果，尚不能确认用户设备具体触发了哪一条路径。
+
+- 上游 Bridge 的正常密码登录 HTML 返回 HTTP 401；旧组件把该主文档状态码直接记为终止错误，并拒绝随后到达的可信 ready。先写失败再 ready，以及先 ready 再收到 401，两种顺序均已复现。现在 401 等待可信 DSH 登录/应用指纹，不直接判为成功；无指纹的 401 仍在 20 秒后失败。
+- 注入较早时页面指纹或原生消息通道可能尚未出现；旧脚本遇到相同 nonce 直接返回，完成阶段再次注入也不重新检查。现在重复注入仅重试 readiness；成功后只发送一次，不重复安装通知构造器或监听。
+- 初次成功后同源整页重载，Store 的初始 loading 已结束；旧 watchdog 因此没有再次启动。现在超时跟随每个文档的 readiness，重载的未验证 401 仍精确在 20 秒失败，已验证的登录页不会被迟到 timeout 覆盖。
+- 首页和抽屉两个扫码入口均使用扫描框图标 `ScanLine`，不再使用二维码图案；真实路由渲染断言覆盖两个入口。
+
+网络错误、其他主文档 HTTP 4xx/5xx 与 render process 终止仍为失败；generic HTML、外站/子框架、错误 nonce/source 不能获得就绪。未修改上游或安装本地 SDK。
+
+| 检查                | 本轮结果                                                               |
+| ------------------- | ---------------------------------------------------------------------- |
+| TypeScript / ESLint | `tsc --noEmit` 与全工程 `--max-warnings 0` 均通过                      |
+| 完整测试            | 13 个文件、481 项；5 个独立进程连续全通过                              |
+| 随机测试            | seed `100404`，481/481 通过                                            |
+| Expo 兼容           | `expo install --check` 通过                                            |
+| Android export      | 清除缓存后通过，4094 modules、28 assets、Hermes bundle 7,279,563 bytes |
+| Android prebuild    | `--platform android --no-install` 通过；依赖文件无变更                 |
+| 新版 APK / 真机     | 未执行；已发布 `v0.1.0` APK 不包含本轮修复                             |
+
+本轮本地 Hermes bundle SHA-256（不是 APK 校验值）：
+
+```text
+1b2f9148e3492d926bd3ccc670ef71e68e432d431fd566d621eb5cc0f71a10e5
+```
+
+### 本轮代表性变异验证
+
+内存 transform 前后完整 control 均为 481/481 通过；8 个样本全部由实际断言击杀，0 幸存、0 无效样本。
+
+| 变异决策                                    | 失败 / 该范围测试数 |
+| ------------------------------------------- | ------------------- |
+| 恢复把正常登录页 HTTP 401 直接记为失败      | 5 / 26              |
+| watchdog 仅覆盖初次 loading，不覆盖文档重载 | 1 / 26              |
+| 相同 nonce 再次注入不重试 readiness         | 3 / 139             |
+| 每次注入重复发送 ready                      | 6 / 113             |
+| 原生消息通道出现前消耗唯一 ready 机会       | 1 / 113             |
+| 任意 complete HTML 都记为 ready             | 35 / 139            |
+| 再次注入跳过 origin/top-frame 检查          | 4 / 113             |
+| 两处扫码入口恢复为二维码图案                | 1 / 13              |
+
+没有把语法、import、收集、未处理异常或 runner 失败算作击杀。44 个保护文件在运行前后的 SHA-256 不变；没有改写生产源码或测试。详细本地证据：[connection-mutation-results.json](../.temp/connection-mutation-results.json)、[connection-mutation-check.mjs](../.temp/connection-mutation-check.mjs)。这些临时文件不入库，结果不等于 Android 真机验证。
+
+## v0.1.1 发布候选：UI、文档导航与声明打包（2026-10-03）
+
+本节为最新候选结果；上方 469 / 481 项表保留各阶段历史，不代表最新测试数量。版本 `0.1.1`、Android versionCode `2`，用户已批准推送与 APK 发布；本地 SDK 仍未安装。
+
+- 页面全宽作为原生 right/slide Drawer 的 `swipeEdgeWidth`，保留原生横向阈值和纵向失败规则；尺寸变化跟随 `useWindowDimensions`，不增加自定义手势层，抽屉开关仍不重挂 WebView。
+- 首页最近连接与扫码按钮同为描边，自动扫描增加对比色雷达图标；当前/最近连接使用相同标题及列表项，无当前卡片、行内刷新或可用状态文字，状态仍有圆点与无障碍描述。最近标题右侧刷新复用真实 singleflight 探测，不重新连接网页。
+- 从本地 DSH 内核提取原始鲸鱼、DeepSeek 与 Harness 的 SVG 路径，保持几何字符串不变，三行居中竖排；鲸鱼无白底，使用主题语义色反转，原 launcher PNG 不变。
+- 复核新增三个先红后绿的真实 WebView / VM 回归：前一文档 19 秒时切到新文档，新文档仍获得完整 20 秒；新文档的可信 ready 可在旧截止后成功；Android `loading: false` 的 history/hash 回调不清除 one-shot 就绪、不取消待确认 focus。
+- 原生 Expo 配置将 [第三方声明](../THIRD_PARTY_NOTICES.md) 全文嵌入 `extra.thirdPartyNotices`，复用唯一声明文件。真实 `getConfig` 回归与 Expo Constants 生成脚本均验证完整文本。Release 从实际 APK 的 `assets/app.config` 解压逐字核对，附带上传声明并纳入校验和。
+
+| 检查                | 最新结果                                                                                   |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| 安装 / Expo 兼容    | frozen lockfile 安装与 `expo install --check` 通过，无依赖变更                             |
+| TypeScript / ESLint | `tsc --noEmit`、全工程 `--max-warnings 0` 通过                                             |
+| 完整测试            | 14 个文件、489 项；5 个独立完整进程连续通过                                                |
+| 随机测试            | seed `100408`，489/489 通过                                                                |
+| 代表性变异          | 15 个全部由断言击杀；前后 controls 均 489/489，0 幸存 / 0 无效；47 个保护文件 SHA-256 不变 |
+| Android export      | 清缓存后通过，4094 modules、27 assets、Hermes 7,297,673 bytes                              |
+| Android prebuild    | `--platform android --no-install` 通过；Android versionName `0.1.1`、versionCode `2`       |
+| 工作流检查          | actionlint 1.7.12 通过（Windows 未运行 shellcheck/pyflakes）                               |
+| 新 APK / 设备       | 等待远端真实 Release 与产物核验；设备验收未执行                                            |
+
+最终本地 Hermes bundle（不是 APK）SHA-256：
+
+```text
+0c506a6d31a4bc08c7e4e1feba04b5c83519e798647aa4b24e0a1ef40351c5ce
+```
+
+### v0.1.1 代表性变异
+
+| 恢复的错误决策                | 失败 / 该范围测试数 |
+| ----------------------------- | ------------------- |
+| HTTP 401 登录文档直接终止     | 5 / 29              |
+| watchdog 仅覆盖最初连接       | 3 / 29              |
+| 新文档继承旧截止时间          | 2 / 29              |
+| history/hash 回调清除文档就绪 | 1 / 29              |
+| 相同 nonce 不重试 readiness   | 3 / 142             |
+| 重复 ready 握手               | 6 / 113             |
+| transport 出现前消耗 ready    | 1 / 113             |
+| 任意 HTML 视为 DSH            | 35 / 142            |
+| 再次注入忽略 origin/top       | 4 / 113             |
+| 扫码恢复二维码图案            | 2 / 17              |
+| 抽屉仅右边缘可滑              | 1 / 17              |
+| 最近连接按钮无描边            | 1 / 17              |
+| 标题刷新为空操作              | 1 / 17              |
+| 鲸鱼不随主题反色              | 1 / 17              |
+| Harness 字形与底牌同色        | 1 / 17              |
+
+每个变异一次命中，测试收集、import、未处理异常与 runner 失败均为零，不将这些误算为击杀。临时脚本与报告：[connection-mutation-check.mjs](../.temp/connection-mutation-check.mjs)、[v011-mutation-results.json](../.temp/v011-mutation-results.json)，不入库。原生 WebView 回调、全页手势与 SVG 真机视觉仍需下面的设备验收，自动化通过不替代这些结果。
+
 ## 真机验收清单（尚未执行）
 
 ### Android 与 LAN
 
-- [ ] 在至少一台 Android 真机安装开发客户端/APK，验证冷启动、明暗主题、鲸鱼与三点动画、系统 inset/返回键。
+- [ ] 在至少一台 Android 真机安装开发客户端/APK，验证冷启动、明暗主题、无白底鲸鱼 / DeepSeek / Harness 三行 SVG 裁切及反色、三点动画、系统 inset/返回键。
 - [ ] 首次启动历史为空自动扫描；已保存可用主机优先连接；全部离线进入手动页；取消和重复扫描无迟到跳转。
 - [ ] 验证不同 LAN IP、主机防火墙、访客网络隔离、Wi-Fi 切换、无 IPv4/VPN 及自定义端口 QR。
-- [ ] 右边缘向左滑打开右侧 slide 抽屉，网页不重载；最近连接按钮与网页按钮同样可打开；首次 guide 点按或打开抽屉后不再弹。
-- [ ] 列表只显示五条，绿/红状态与主机启停一致；点击重连、当前重启、断开后扫描且不会立即连回刚断开的 origin。
+- [ ] 从页面中央、左侧与右侧向左滑均打开 right/slide 抽屉，网页不重载；纵向网页滚动与系统返回手势不冲突；最近连接按钮与网页按钮同样可打开；首次 guide 点按或打开抽屉后不再弹。
+- [ ] 列表只显示五条，绿/红圆点与主机启停一致，TalkBack 可读出状态；标题刷新仅更新可用性，点击当前/最近项重连，断开后扫描且不会立即连回刚断开的 origin。
 
 ### 相机与 WebView
 

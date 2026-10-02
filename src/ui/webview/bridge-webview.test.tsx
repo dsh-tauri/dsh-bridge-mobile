@@ -203,13 +203,13 @@ class BrowserMessageEvent extends Event {
   }
 }
 
-function createPage(selectSession?: (sessionId: string) => void) {
+function createPage(selectSession?: (sessionId: string) => void, kind: 'app' | 'login' | 'unverified' = 'app') {
   const posts: string[] = []
   const events = new EventTarget()
   const window = {
     top: null as unknown,
-    __DSH_BOOT__: {},
-    __dshClientCtx: { uiWorkspace: { openSession: selectSession } },
+    __DSH_BOOT__: kind === 'app' ? {} : undefined,
+    __dshClientCtx: kind === 'app' ? { uiWorkspace: { openSession: selectSession } } : undefined,
     ReactNativeWebView: { postMessage: (raw: string) => posts.push(raw) },
     addEventListener: (type: string, listener: EventListener, options?: AddEventListenerOptions) => events.addEventListener(type, listener, options),
     dispatchEvent: (event: Event) => events.dispatchEvent(event),
@@ -218,7 +218,7 @@ function createPage(selectSession?: (sessionId: string) => void) {
   const document = {
     hidden: false,
     readyState: 'complete',
-    getElementById: () => null,
+    getElementById: (id: string) => kind === 'login' && id === 'loginForm' ? {} : null,
     querySelectorAll: () => [],
     dispatchEvent: () => true,
   }
@@ -227,7 +227,7 @@ function createPage(selectSession?: (sessionId: string) => void) {
     expect(runInContext(script, context, { timeout: 1000 })).toBe(true)
   }
   run(webView().props.injectedJavaScriptBeforeContentLoaded)
-  return { posts, document, run }
+  return { posts, window, document, run }
 }
 
 beforeEach(async () => {
@@ -338,6 +338,211 @@ describe('rendered Bridge WebView document lifecycle', () => {
     expect(connection.guidedHosts).toEqual(['http://bridge.test:3080'])
     expect(connection.swipeHintVisible).toBe(false)
     expect(connection.loadError).toBeNull()
+  })
+
+  it.each(['before', 'after'] as const)('shows the verified DSH login document when Android reports its HTTP 401 %s readiness', async (order) => {
+    await mount()
+    const page = createPage(undefined, 'login')
+    expect(page.posts.map(raw => JSON.parse(raw))).toEqual([{
+      channel: 'dsh-bridge',
+      origin: 'http://bridge.test:3080',
+      nonce: 'webview-uuid-1',
+      payload: { type: 'dsh://bridge-ready' },
+    }])
+    async function unauthorized() {
+      await act(async () => {
+        webView().props.onHttpError({ nativeEvent: { url: alpha.url, statusCode: 401 } })
+      })
+    }
+    if (order === 'before')
+      await unauthorized()
+    await rawMessage(page.posts[0]!)
+    if (order === 'after')
+      await unauthorized()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20000)
+    })
+
+    expect(connection.loadError).toBeNull()
+    expect(connection.loading).toBe(false)
+    expect(connection.history).toEqual([{ ...alpha, lastConnectedAt: 1767225600000 }])
+    expect(connection.health['http://bridge.test:3080']).toBe('available')
+    expect(texts()).not.toContain(failure)
+    expect(texts()).not.toContain('正在连接...')
+  })
+
+  it('does not accept an HTTP 401 document without a DSH login or application fingerprint', async () => {
+    await mount()
+    const page = createPage(undefined, 'unverified')
+    await act(async () => {
+      webView().props.onHttpError({ nativeEvent: { url: alpha.url, statusCode: 401 } })
+    })
+    expect(page.posts).toEqual([])
+    expect(connection.loading).toBe(true)
+    expect(connection.loadError).toBeNull()
+    expect(connection.history).toEqual([])
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20000)
+    })
+
+    expect(connection.loading).toBe(false)
+    expect(connection.loadError).toBe(failure)
+    expect(connection.history).toEqual([])
+    expect(texts()).toContain(failure)
+  })
+
+  it('times out a later unverified HTTP 401 document without erasing earlier successful history', async () => {
+    await mount()
+    await ready()
+    await act(async () => {
+      connection.dismissHint()
+      await vi.advanceTimersByTimeAsync(30000)
+      webView().props.onLoadStart({ nativeEvent: { url: alpha.url, loading: true } })
+    })
+    const page = createPage(undefined, 'unverified')
+    await act(async () => {
+      webView().props.onHttpError({ nativeEvent: { url: alpha.url, statusCode: 401 } })
+      await vi.advanceTimersByTimeAsync(19999)
+    })
+    expect(page.posts).toEqual([])
+    expect(connection.loadError).toBeNull()
+    expect(connection.history).toEqual([{ ...alpha, lastConnectedAt: 1767225600000 }])
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+
+    expect(connection.loadError).toBe(failure)
+    expect(connection.history).toEqual([{ ...alpha, lastConnectedAt: 1767225600000 }])
+    expect(texts()).toContain(failure)
+    expect(native.getPermissionsAsync).toHaveBeenCalledTimes(1)
+  })
+
+  it('accepts a later verified HTTP 401 login document without its reload deadline firing', async () => {
+    await mount()
+    await ready()
+    await act(async () => {
+      connection.dismissHint()
+      await vi.advanceTimersByTimeAsync(30000)
+      webView().props.onLoadStart({ nativeEvent: { url: alpha.url, loading: true } })
+    })
+    const page = createPage(undefined, 'login')
+    await act(async () => {
+      webView().props.onHttpError({ nativeEvent: { url: alpha.url, statusCode: 401 } })
+      await vi.advanceTimersByTimeAsync(19999)
+    })
+    await rawMessage(page.posts[0]!)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20000)
+    })
+
+    expect(connection.loading).toBe(false)
+    expect(connection.loadError).toBeNull()
+    expect(connection.history).toEqual([{ ...alpha, lastConnectedAt: 1767225600000 }])
+    expect(texts()).not.toContain(failure)
+    expect(texts()).not.toContain('正在连接...')
+    expect(connection.swipeHintVisible).toBe(false)
+  })
+
+  it('recognizes a verified document on Android finish reinjection after the early shim saw no fingerprint', async () => {
+    await mount()
+    const page = createPage(undefined, 'unverified')
+    const view = await viewRef()
+    expect(page.posts).toEqual([])
+    page.window.__DSH_BOOT__ = {}
+    await act(async () => {
+      webView().props.onLoad({ nativeEvent: { url: alpha.url } })
+    })
+    for (const [script] of view.injectJavaScript.mock.calls)
+      page.run(script)
+    expect(page.posts.map(raw => JSON.parse(raw))).toEqual([{
+      channel: 'dsh-bridge',
+      origin: 'http://bridge.test:3080',
+      nonce: 'webview-uuid-1',
+      payload: { type: 'dsh://bridge-ready' },
+    }])
+    await rawMessage(page.posts[0]!)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20000)
+    })
+
+    expect(connection.loading).toBe(false)
+    expect(connection.loadError).toBeNull()
+    expect(connection.history).toEqual([{ ...alpha, lastConnectedAt: 1767225600000 }])
+    expect(texts()).not.toContain(failure)
+  })
+
+  it('gives a new trusted document its own full deadline while the previous document is not ready', async () => {
+    await mount()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(19000)
+      webView().props.onLoadStart({ nativeEvent: { url: 'http://bridge.test:3080/login', loading: true } })
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    expect(connection.loadError).toBeNull()
+    expect(connection.loading).toBe(true)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(18999)
+    })
+    expect(connection.loadError).toBeNull()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+
+    expect(connection.loadError).toBe(failure)
+    expect(connection.history).toEqual([])
+    expect(texts()).toContain(failure)
+  })
+
+  it('accepts the verified replacement document after the previous document deadline has elapsed', async () => {
+    await mount()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(19000)
+      webView().props.onLoadStart({ nativeEvent: { url: 'http://bridge.test:3080/login', loading: true } })
+    })
+    const page = createPage(undefined, 'login')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    await rawMessage(page.posts[0]!, 'http://bridge.test:3080/login')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20000)
+    })
+
+    expect(connection.loadError).toBeNull()
+    expect(connection.loading).toBe(false)
+    expect(connection.history).toEqual([{ ...alpha, lastConnectedAt: 1767225621000 }])
+    expect(texts()).not.toContain(failure)
+  })
+
+  it('keeps the one-shot ready document verified across Android same-document history and hash callbacks', async () => {
+    connection.queueFocus(focus)
+    await mount()
+    const page = createPage()
+    await rawMessage(page.posts[0]!)
+    const view = await viewRef()
+    view.injectJavaScript.mockClear()
+    await act(async () => {
+      connection.dismissHint()
+      webView().props.onLoadStart({ nativeEvent: { url: 'http://bridge.test:3080/tasks?session=alpha', loading: false } })
+      webView().props.onLoadStart({ nativeEvent: { url: 'http://bridge.test:3080/tasks?session=alpha#latest', loading: false } })
+    })
+    expect(view.injectJavaScript).not.toHaveBeenCalled()
+    expect(connection.pendingFocus).toEqual(focus)
+    page.run(webView().props.injectedJavaScript)
+    expect(page.posts).toHaveLength(1)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20000)
+    })
+
+    expect(connection.loadError).toBeNull()
+    expect(connection.loading).toBe(false)
+    expect(connection.history).toEqual([{ ...alpha, lastConnectedAt: 1767225600000 }])
+    expect(connection.swipeHintVisible).toBe(false)
+    expect(texts()).not.toContain(failure)
+    await message({ type: 'dsh://focus-result', requestId: 'webview-uuid-2', handled: true }, { url: 'http://bridge.test:3080/tasks?session=alpha#latest' })
+    expect(connection.pendingFocus).toBeNull()
   })
 
   it('replaces a native-finished but unauthenticated document with a visible failure at exactly twenty seconds', async () => {
@@ -608,7 +813,7 @@ describe('rendered Bridge WebView acknowledged notification focus', () => {
     const view = await viewRef()
     view.injectJavaScript.mockClear()
     await act(async () => {
-      webView().props.onLoadStart?.({ nativeEvent: { url: alpha.url } })
+      webView().props.onLoadStart({ nativeEvent: { url: alpha.url, loading: true } })
     })
     await ready()
 
@@ -624,7 +829,7 @@ describe('rendered Bridge WebView acknowledged notification focus', () => {
     const view = await viewRef()
     view.injectJavaScript.mockClear()
     await act(async () => {
-      webView().props.onLoadStart?.({ nativeEvent: { url: 'http://bridge.test:3080/tasks' } })
+      webView().props.onLoadStart({ nativeEvent: { url: 'http://bridge.test:3080/tasks', loading: true } })
       webView().props.onMessage({ nativeEvent: { url: alpha.url, data: JSON.stringify({ channel: 'dsh-bridge', origin: alpha.id, nonce, payload: { type: 'dsh://focus-result', requestId: 'webview-uuid-2', handled: true } }) } })
     })
     expect(connection.pendingFocus).toEqual(focus)

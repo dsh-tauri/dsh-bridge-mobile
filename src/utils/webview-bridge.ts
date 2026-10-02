@@ -56,7 +56,10 @@ export function createNotificationShim(origin: string, nonce: string): string {
   var expectedOrigin = ${JSON.stringify(origin)};
   var nonce = ${JSON.stringify(nonce)};
   if (window.top !== window || location.origin !== expectedOrigin) return;
-  if (window.__dshBridgeNonce === nonce) return;
+  if (window.__dshBridgeNonce === nonce) {
+    if (typeof window.__dshBridgeReady === 'function') window.__dshBridgeReady();
+    return;
+  }
   window.__dshBridgeNonce = nonce;
   var instances = new Map();
   var hidden = document.hidden;
@@ -190,11 +193,15 @@ export function createNotificationShim(origin: string, nonce: string): string {
       tryFocus();
     }
   };
+  var readySent = false;
   function ready() {
-    if (document.readyState === 'complete' && (window.__DSH_BOOT__ || window.__dshClientCtx || document.getElementById('loginForm'))) {
+    if (!readySent && window.ReactNativeWebView && document.readyState === 'complete'
+      && (window.__DSH_BOOT__ || window.__dshClientCtx || document.getElementById('loginForm'))) {
+      readySent = true;
       send({ type: 'dsh://bridge-ready' });
     }
   }
+  window.__dshBridgeReady = ready;
   if (document.readyState === 'complete') ready();
   else window.addEventListener('load', ready, { once: true });
   window.addEventListener('pagehide', function () {

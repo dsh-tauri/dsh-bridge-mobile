@@ -5,13 +5,13 @@ import { useEffect } from 'react'
 import { Else, If, Then } from 'react-if-lite'
 import { BackHandler, ScrollView, Text, useWindowDimensions, View } from 'react-native'
 import { Drawer } from 'react-native-drawer-layout'
-import { History, QrCode, RefreshCw, X } from 'react-native-lucide'
+import { History, Radar, RefreshCw, ScanLine, X } from 'react-native-lucide'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useStore } from 'valtio-define'
 import { DotsLoader } from '@/components/dots-loader'
+import { DshWordmark } from '@/components/dsh-wordmark'
 import { StatusDot } from '@/components/status-dot'
 import { WhaleLogo } from '@/components/whale-logo'
-import { SWIPE_EDGE_WIDTH } from '@/config/constants'
 import { copy } from '@/config/copy'
 import { connection } from '@/store/modules/connection'
 import { cancelAutoScan, connectAddress, disconnectAndScan, refreshHealth, startAutoScan } from '@/store/modules/connection/runtime'
@@ -37,39 +37,54 @@ function ConnectionDrawer() {
   let currentLabel: string = copy.noConnection
   if (state.current)
     currentLabel = connectionLabel(state.current)
+  let currentStatus: 'checking' | 'available' | 'unavailable' = 'checking'
+  if (state.current)
+    currentStatus = state.health[state.current.id] ?? 'checking'
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: background }} edges={['top', 'bottom', 'right']}>
       <View className="flex-row items-center justify-between px-5 pb-5 pt-3">
         <Text className="text-xl font-semibold text-foreground">{copy.connectionInfo}</Text>
         <Button variant="ghost" isIconOnly isDisabled={!state.hydrated} accessibilityLabel={copy.scanQr} onPress={openScanner}>
-          <QrCode size={22} color={foreground} />
+          <ScanLine size={22} color={foreground} />
         </Button>
       </View>
       <ScrollView className="flex-1" contentContainerStyle={{ paddingHorizontal: 20, gap: 24, paddingBottom: 24 }}>
         <If cond={state.notice}>
           <Then><Text className="text-sm leading-6 text-warning" accessibilityLiveRegion="polite">{state.notice}</Text></Then>
         </If>
-        <View className="gap-3 rounded-2xl border border-border bg-surface-secondary p-4">
-          <Text className="text-xs font-medium text-muted">{copy.currentConnection}</Text>
-          <View className="flex-row items-center justify-between gap-2">
-            <Text className="flex-1 text-sm font-semibold text-foreground" numberOfLines={2} selectable>{currentLabel}</Text>
-            <Button
-              size="sm"
-              variant="ghost"
-              isIconOnly
-              isDisabled={!state.current}
-              accessibilityLabel={copy.reconnect}
-              onPress={() => {
-                if (connection.current)
-                  connectAddress(connection.current)
-              }}
-            >
-              <RefreshCw size={20} color={foreground} />
-            </Button>
-          </View>
+        <View className="gap-3">
+          <Text className="text-sm font-semibold text-foreground">{copy.currentConnection}</Text>
+          <Button
+            variant="ghost"
+            className="h-auto min-h-16 justify-start gap-3 rounded-xl px-3 py-4"
+            isDisabled={!state.current}
+            accessibilityLabel={copy.reconnect}
+            accessibilityHint={`${currentLabel}，${copy[currentStatus]}`}
+            onPress={() => {
+              if (connection.current)
+                connectAddress(connection.current)
+            }}
+          >
+            <If cond={state.current}>
+              <Then><StatusDot status={currentStatus} /></Then>
+            </If>
+            <Text className="flex-1 text-sm font-medium text-foreground" numberOfLines={1}>{currentLabel}</Text>
+          </Button>
         </View>
         <View className="gap-3">
-          <Text className="text-sm font-semibold text-foreground">{copy.recentConnections}</Text>
+          <View className="flex-row items-center justify-between">
+            <Text className="text-sm font-semibold text-foreground">{copy.recentConnections}</Text>
+            <Button
+              variant="ghost"
+              size="sm"
+              isIconOnly
+              isDisabled={!state.hydrated}
+              accessibilityLabel={copy.refreshConnections}
+              onPress={() => { void refreshHealth() }}
+            >
+              <RefreshCw size={18} color={foreground} />
+            </Button>
+          </View>
           <If cond={state.recentFive.length > 0}>
             <Then>
               <View className="gap-2">
@@ -84,11 +99,7 @@ function ConnectionDrawer() {
                       onPress={() => connectAddress(entry)}
                     >
                       <StatusDot status={status} />
-                      <View className="flex-1 gap-1">
-                        <Text className="text-sm font-medium text-foreground" numberOfLines={1}>{connectionLabel(entry)}</Text>
-                        <Text className="text-xs text-muted">{copy[status]}</Text>
-                      </View>
-                      <RefreshCw size={16} color={muted} />
+                      <Text className="flex-1 text-sm font-medium text-foreground" numberOfLines={1}>{connectionLabel(entry)}</Text>
                     </Button>
                   )
                 })}
@@ -113,7 +124,7 @@ export default function HomeScreen() {
   const state = useStore(connection)
   const navigation = useNavigation()
   const { width } = useWindowDimensions()
-  const [background, foreground, backdrop] = useThemeColor(['background', 'foreground', 'backdrop'])
+  const [background, foreground, backdrop, accentForeground] = useThemeColor(['background', 'foreground', 'backdrop', 'accent-foreground'])
   const scanning = state.stage === 'scanning'
   let scanText: string = copy.scanning
   if (state.history.length > 0)
@@ -134,7 +145,10 @@ export default function HomeScreen() {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: background }}>
         <View className="flex-1 items-center justify-center gap-7 px-8">
-          <WhaleLogo />
+          <View className="items-center gap-3">
+            <WhaleLogo />
+            <DshWordmark />
+          </View>
           <If cond={scanning}>
             <Then>
               <DotsLoader />
@@ -147,12 +161,15 @@ export default function HomeScreen() {
           <Then>
             <View className="gap-3 px-6 pb-6">
               <If cond={state.notice}><Then><Text className="pb-3 text-center text-sm leading-6 text-muted" accessibilityLiveRegion="polite">{state.notice}</Text></Then></If>
-              <Button size="lg" isDisabled={!state.hydrated} onPress={() => { void startAutoScan() }}>{copy.autoScan}</Button>
+              <Button size="lg" isDisabled={!state.hydrated} onPress={() => { void startAutoScan() }}>
+                <Radar size={20} color={accentForeground} />
+                <Button.Label>{copy.autoScan}</Button.Label>
+              </Button>
               <Button variant="outline" size="lg" isDisabled={!state.hydrated} onPress={openScanner}>
-                <QrCode size={20} color={foreground} />
+                <ScanLine size={20} color={foreground} />
                 <Button.Label>{copy.scanQr}</Button.Label>
               </Button>
-              <Button variant="ghost" isDisabled={!state.hydrated} onPress={openConnections}>
+              <Button variant="outline" size="lg" isDisabled={!state.hydrated} onPress={openConnections}>
                 <History size={19} color={foreground} />
                 <Button.Label>{copy.recentConnections}</Button.Label>
               </Button>
@@ -173,7 +190,7 @@ export default function HomeScreen() {
       drawerStyle={{ width: Math.min(width * 0.88, 384), backgroundColor: background }}
       overlayStyle={{ backgroundColor: backdrop }}
       overlayAccessibilityLabel={copy.closeDrawer}
-      swipeEdgeWidth={SWIPE_EDGE_WIDTH}
+      swipeEdgeWidth={width}
       swipeEnabled={state.hydrated}
       renderDrawerContent={() => <ConnectionDrawer />}
       style={{ flex: 1 }}

@@ -7,8 +7,8 @@ React Native 局域网发现与 WebView 连接管理器，使用 Expo Router、H
 ## 功能
 
 - 启动先恢复历史连接及安全令牌，优先检测历史；无可用历史时并发发现当前 IPv4 `/24` 网段中的 DSH 服务。
-- 扫描页：黑色鲸鱼、三点脉冲动画、扫描文案及取消按钮。取消后显示底部自动扫描、扫码连接与最近连接入口。
-- `react-native-drawer-layout` 原生手势抽屉：右侧、`slide` 模式，右边缘向左滑打开；当前连接、重新连接、最近五条及可用状态、红色断开按钮。
+- 扫描页：原始 DSH SVG 鲸鱼、DeepSeek、Harness 居中竖排，鲸鱼无白底、随深浅主题反色；三点脉冲动画、扫描文案及取消按钮。取消后显示底部带雷达图标的自动扫描，以及样式一致的描边扫码连接和最近连接按钮。
+- `react-native-drawer-layout` 原生手势抽屉：右侧、`slide` 模式，页面任意位置向左滑打开；当前/最近连接统一为标题和列表项，状态仅显示圆点并保留无障碍描述，最近连接标题右侧统一刷新；底部红色断开按钮。
 - QR 相机识别 HTTP/HTTPS 地址，包括上游 `?auth=…` / `?token=…` 连接链接；重复扫码锁定、权限拒绝和设置入口。
 - 全屏 `react-native-webview`，抽屉开关不会重新挂载网页；首次连接滑动引导、Android 返回键、加载失败与重连。
 - 上游网页 `Notification` / `dsh://native-notification` 适配原生通知；同 tag 更新、权限单飞、静音通道与冷/热点击恢复连接及会话。
@@ -65,6 +65,7 @@ HeroUI 的实际开发栈与 Expo 57 原生版本一致；不是将所有独立 
 - 桌面与手机需能互访，主机服务必须监听 LAN 接口，防火墙需允许对应端口。
 - 断开清空当前连接并回到扫描页，保留历史；紧接着的那轮扫描跳过刚断开的精确 origin，避免马上连回同一地址。
 - 最多保存 20 条成功连接，抽屉显示最近五条。成功由可信 DSH 文档就绪消息确认，不依赖 Android 会在网络错误前触发的原生 `onLoad`。
+- 抽屉的状态圆点表示主机探测结果，不等于 WebView 页面已经就绪。Bridge 的正常密码登录页返回 HTTP 401；APP 等待同源、带 nonce 的 DSH 登录/应用指纹，不把该状态码直接当成网络失败。每个新加载文档重新获得 20 秒上限；Android 页面内 history/hash 回调保留就绪和通知定位。重复注入可重查稍晚出现的页面指纹或原生消息通道，不重复安装通知监听。
 - AsyncStorage 只存无令牌的连接元数据；令牌单独存 SecureStore。密码登录保留在 WebView 内，由其 cookie jar 管理，不通过 RN fetch 登录。
 - LAN HTTP 通过 Android cleartext 配置支持；HTTP 不提供传输保密性，请仅用于可信局域网。公网连接优先 HTTPS，避免将带令牌的 QR 分享给他人。
 
@@ -87,6 +88,7 @@ HeroUI 的实际开发栈与 Expo 57 原生版本一致；不是将所有独立 
 - [探测客户端](src/services/bridge-client.ts)、[URL 协议](src/utils/bridge-protocol.ts)、[候选生成](src/utils/discovery.ts)：身份校验、取消与有界并发。
 - [WebView](src/ui/webview/bridge-webview.tsx)：原生导航边界、可信就绪、通知点击 acknowledgment。
 - [主题变量](src/styles/variables.css)、[文案](src/config/copy.ts)、[开发规则](AGENTS.md)。
+- [鲸鱼](src/components/whale-logo.tsx) / [SVG 字标](src/components/dsh-wordmark.tsx)：保留 DSH 原始路径，分别适配主题与竖排；来源和 MIT 授权见 [第三方声明](THIRD_PARTY_NOTICES.md)。
 
 ## Android APK CI 与发布
 
@@ -105,8 +107,10 @@ HeroUI 的实际开发栈与 Expo 57 原生版本一致；不是将所有独立 
 
 四项全有时对 release APK 使用正式 key 重新签名；全无时使用开发证书，并在日志、release notes 中明确警告且强制标为 prerelease；部分配置直接失败。开发证书不能视作安全的生产签名；切换正式签名通常不能覆盖安装已有开发签名 APK，需先卸载。
 
-远端构建环境：JDK 17、Android command-line tools 16.0、API 36 / build-tools 36.0.0、NDK 27.1.12297006、CMake 3.22.1。无需先安装本地 SDK 即可由 Release CI 构建 APK。产物为 `dsh-bridge-v<版本>-android.apk` 与 `SHA256SUMS.txt`。上传前执行 zipalign 16 KB 对齐检查、签名验证及 APK metadata 检查；build 与 publish 分离，发布同标签重跑使用稳定资产名与显式 prerelease 状态。
+远端构建环境：JDK 17、Android command-line tools 16.0、API 36 / build-tools 36.0.0、NDK 27.1.12297006、CMake 3.22.1。无需先安装本地 SDK 即可由 Release CI 构建 APK。产物为 `dsh-bridge-v<版本>-android.apk`、`SHA256SUMS.txt` 与 [第三方声明](THIRD_PARTY_NOTICES.md)。[动态配置](app.config.js) 从同一声明读取全文，随 Expo Constants 打包进 APK；上传前同时验证声明、zipalign 16 KB 对齐、签名及 APK metadata，并输出公开证书指纹。build 与 publish 分离，发布同标签重跑使用稳定资产名与显式 prerelease 状态。
 
 首次 [v0.1.0 Release](https://github.com/dsh-tauri/dsh-bridge-mobile/releases/tag/v0.1.0) 已发布：[下载 Android APK](https://github.com/dsh-tauri/dsh-bridge-mobile/releases/download/v0.1.0/dsh-bridge-v0.1.0-android.apk)（约 98.3 MiB）和 [SHA-256 校验文件](https://github.com/dsh-tauri/dsh-bridge-mobile/releases/download/v0.1.0/SHA256SUMS.txt)。仓库为私有，下载需拥有访问权限。本次为**开发签名预发布**，仅供测试；[原生 Release CI](https://github.com/dsh-tauri/dsh-bridge-mobile/actions/runs/37063335612) 的构建、签名/对齐验证和发布全部成功，下载后 SHA-256 已核对一致。
+
+`v0.1.1` / Android versionCode `2` 包含连接误判与文档导航修复、全页抽屉手势、统一按钮/列表与三行原始 SVG 品牌。发布候选已通过 489 项测试的五次独立运行及随机顺序、15 个代表性变异、typecheck、零警告 lint、Android export 和 prebuild。用户已批准推送发布；新 APK 在真实 Release 成功并核验后更新此处，旧 `v0.1.0` APK 不包含本轮调整。
 
 按用户要求先完成远端 APK，截至发布完成时本地 SDK 尚未安装。APK 安装、签名升级、16 KB 真机和手势/相机/通知行为尚待设备验收，完整状态见 [验证记录](docs/validation.md)。
