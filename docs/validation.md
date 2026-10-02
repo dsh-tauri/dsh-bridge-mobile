@@ -119,8 +119,9 @@ Clean-checkout 检查暴露了仅靠被忽略的 Expo 生成类型声明才能�
 2026-10-03 用户授权 SDK 安装、推送代码和发布 Android APK。目标仓库为私有 [`dsh-tauri/dsh-bridge-mobile`](https://github.com/dsh-tauri/dsh-bridge-mobile)，版本 `v0.1.0` / Android versionCode `1`；无正式签名 secrets，按约定使用开发签名并标为 prerelease。
 
 - 发布前复验：typecheck、零警告 lint、随机 seed `100301` 的 469/469 测试通过。
-- 本地 SDK：安装执行中；官方 Google 下载当前存在 TLS 握手失败，尚未证明安装成功。
-- 远端验证与发布：[Actions](https://github.com/dsh-tauri/dsh-bridge-mobile/actions)、[Releases](https://github.com/dsh-tauri/dsh-bridge-mobile/releases)；提交后跟进实际结果，不提前宣称 APK 成功。
+- 首次提交 `644948e` 已推送到 `main`。[首次 Ubuntu CI](https://github.com/dsh-tauri/dsh-bridge-mobile/actions/runs/37062026233) 全部通过，包含安装、Expo 兼容、typecheck、lint、普通/随机测试、export 与 prebuild。
+- 用户随后明确优先完成 Release APK，本地 SDK 留待发布后处理。本轮停止本地 SDK 安装与中转方案，未创建 SDK artifact；仅远端 Release job 安装必要工具。Android command-line tools 固定 `16.0` / `12266719`，与 JDK 17 配对。
+- 原生 APK 发布：[Actions](https://github.com/dsh-tauri/dsh-bridge-mobile/actions)、[Releases](https://github.com/dsh-tauri/dsh-bridge-mobile/releases)；继续跟进实际结果，不提前宣称 APK 成功。
 - 真机验收仍未执行；远端编译、签名/对齐验证与设备行为分开记录。
 
 本地成果和规范见 [README](../README.md) 与 [开发规则](../AGENTS.md)。

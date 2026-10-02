@@ -105,6 +105,6 @@ HeroUI 的实际开发栈与 Expo 57 原生版本一致；不是将所有独立 
 
 四项全有时对 release APK 使用正式 key 重新签名；全无时使用开发证书，并在日志、release notes 中明确警告且强制标为 prerelease；部分配置直接失败。开发证书不能视作安全的生产签名；切换正式签名通常不能覆盖安装已有开发签名 APK，需先卸载。
 
-构建环境：JDK 17、Android API 36 / build-tools 36.0.0、NDK 27.1.12297006、CMake 3.22.1。产物为 `dsh-bridge-v<版本>-android.apk` 与 `SHA256SUMS.txt`。上传前执行 zipalign 16 KB 对齐检查、签名验证及 APK metadata 检查；build 与 publish 分离，发布同标签重跑使用稳定资产名与显式 prerelease 状态。
+远端构建环境：JDK 17、Android command-line tools 16.0、API 36 / build-tools 36.0.0、NDK 27.1.12297006、CMake 3.22.1。无需先安装本地 SDK 即可由 Release CI 构建 APK。产物为 `dsh-bridge-v<版本>-android.apk` 与 `SHA256SUMS.txt`。上传前执行 zipalign 16 KB 对齐检查、签名验证及 APK metadata 检查；build 与 publish 分离，发布同标签重跑使用稳定资产名与显式 prerelease 状态。
 
-Android SDK 安装和首次 `v0.1.0` 发布已获授权；没有配置正式签名 secrets 时，发布明确标注开发签名的预发布 APK。[CI 执行记录](https://github.com/dsh-tauri/dsh-bridge-mobile/actions) 和 [Release](https://github.com/dsh-tauri/dsh-bridge-mobile/releases) 是远端结果入口。APK 安装、签名升级、16 KB 真机和手势/相机/通知行为尚待设备验收，完整状态见 [验证记录](docs/validation.md)。
+首次 `v0.1.0` 发布已获授权；本轮优先完成远端 APK，本地 SDK 留待后续。没有配置正式签名 secrets 时，发布明确标注开发签名的预发布 APK。[CI 执行记录](https://github.com/dsh-tauri/dsh-bridge-mobile/actions) 和 [Release](https://github.com/dsh-tauri/dsh-bridge-mobile/releases) 是远端结果入口。APK 安装、签名升级、16 KB 真机和手势/相机/通知行为尚待设备验收，完整状态见 [验证记录](docs/validation.md)。
