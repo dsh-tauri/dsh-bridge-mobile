@@ -1,0 +1,178 @@
+name: Android APK Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to build (for example v0.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apk-release-${{ github.repository }}-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      tag: ${{ steps.metadata.outputs.tag }}
+      prerelease: ${{ steps.metadata.outputs.prerelease }}
+      signing: ${{ steps.signing.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+      - name: Validate version tag
+        id: metadata
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const { execFileSync } = require('node:child_process');
+          const tag = process.env.RELEASE_TAG;
+          if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag)) throw new Error('Expected a version tag such as v0.1.0');
+          const commit = execFileSync('git', ['rev-parse', '--verify', `refs/tags/${tag}^{commit}`], { encoding: 'utf8' }).trim();
+          const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+          if (commit !== head) throw new Error('Checked-out commit does not match the requested tag');
+          const version = tag.slice(1);
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const app = JSON.parse(fs.readFileSync('app.json', 'utf8')).expo;
+          if (pkg.version !== version || app.version !== version) throw new Error('Tag, package.json and app.json versions must match');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `tag=${tag}\nprerelease=${version.includes('-')}\n`);
+          NODE
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+      - name: Check Expo native compatibility
+        run: bunx expo install --check
+      - name: Typecheck and lint
+        run: |
+          bun run typecheck
+          bun run lint --max-warnings 0
+      - name: Test shuffled
+        run: bunx vitest run --sequence.shuffle
+      - name: Determine signing mode
+        id: signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          present=0
+          for value in "$KEYSTORE_BASE64" "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD"; do
+            if [[ -n "$value" ]]; then present=$((present + 1)); fi
+          done
+          if [[ "$present" -eq 0 ]]; then
+            echo 'mode=debug' >> "$GITHUB_OUTPUT"
+            echo '::warning::No release signing secrets configured; the APK will use the development certificate.'
+          elif [[ "$present" -eq 4 ]]; then
+            echo 'mode=release' >> "$GITHUB_OUTPUT"
+          else
+            echo '::error::Configure all four Android signing secrets or none; partial signing configuration is rejected.'
+            exit 1
+          fi
+      - name: Install Android build tools
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006' 'cmake;3.22.1'
+      - name: Generate Android project
+        env:
+          CI: '1'
+        run: bun run prebuild:android
+      - name: Build release APK
+        env:
+          CI: '1'
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace -PreactNativeArchitectures=armeabi-v7a,arm64-v8a,x86_64
+      - name: Sign and verify APK
+        env:
+          RELEASE_TAG: ${{ steps.metadata.outputs.tag }}
+          SIGNING_MODE: ${{ steps.signing.outputs.mode }}
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          tools="$ANDROID_HOME/build-tools/36.0.0"
+          source='android/app/build/outputs/apk/release/app-release.apk'
+          mkdir -p release
+          destination="release/dsh-bridge-${RELEASE_TAG}-android.apk"
+          "$tools/zipalign" -c -P 16 4 "$source"
+          if [[ "$SIGNING_MODE" == 'release' ]]; then
+            keystore="$RUNNER_TEMP/dsh-bridge-release.keystore"
+            trap 'rm -f -- "$keystore"' EXIT
+            umask 077
+            printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$keystore"
+            "$tools/apksigner" sign --ks "$keystore" --ks-key-alias "$KEY_ALIAS" --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEY_PASSWORD --out "$destination" "$source"
+          else
+            cp "$source" "$destination"
+          fi
+          "$tools/apksigner" verify --verbose "$destination"
+          "$tools/aapt" dump badging "$destination"
+          (
+            cd release
+            sha256sum ./*.apk > SHA256SUMS.txt
+          )
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android-apk
+          path: release/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: android-apk
+          path: release
+      - name: Publish APK release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
+          SIGNING_MODE: ${{ needs.build.outputs.signing }}
+        run: |
+          {
+            printf '# DSH Bridge %s\n\nAndroid APK only. iOS: TODO.\n\n' "$RELEASE_TAG"
+            if [[ "$SIGNING_MODE" == 'debug' ]]; then
+              printf '> WARNING: This APK uses the shared Android development certificate. It is for evaluation, not production distribution. Configure all four signing secrets for release-signed updates.\n\n'
+            else
+              printf 'This APK is signed with the configured release key.\n\n'
+            fi
+            printf 'See SHA256SUMS.txt for artifact checksums.\n'
+          } > release-notes.md
+          flags=(--prerelease=false)
+          if [[ "$PRERELEASE" == 'true' || "$SIGNING_MODE" == 'debug' ]]; then flags=(--prerelease); fi
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --title "DSH Bridge $RELEASE_TAG" --notes-file release-notes.md "${flags[@]}"
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --title "DSH Bridge $RELEASE_TAG" --notes-file release-notes.md "${flags[@]}"
+          fi
+          gh release upload "$RELEASE_TAG" release/*.apk release/SHA256SUMS.txt --clobber

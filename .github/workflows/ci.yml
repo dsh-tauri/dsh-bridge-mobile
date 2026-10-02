@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+      - name: Check Expo native compatibility
+        run: bunx expo install --check
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Lint
+        run: bun run lint --max-warnings 0
+      - name: Test
+        run: bunx vitest run
+      - name: Test shuffled
+        run: bunx vitest run --sequence.shuffle
+      - name: Export Android JavaScript
+        env:
+          CI: '1'
+        run: bun run build
+      - name: Verify Android prebuild
+        env:
+          CI: '1'
+        run: bun run prebuild:android

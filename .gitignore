@@ -1,0 +1,17 @@
+node_modules/
+.expo/
+.temp/
+android/
+ios/
+dist/
+coverage/
+*.keystore
+*.jks
+*.apk
+*.aab
+.env
+.env.*
+!.env.example
+expo-env.d.ts
+src/uniwind-types.d.ts
+*.tsbuildinfo
