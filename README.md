@@ -111,6 +111,8 @@ HeroUI 的实际开发栈与 Expo 57 原生版本一致；不是将所有独立 
 
 首次 [v0.1.0 Release](https://github.com/dsh-tauri/dsh-bridge-mobile/releases/tag/v0.1.0) 已发布：[下载 Android APK](https://github.com/dsh-tauri/dsh-bridge-mobile/releases/download/v0.1.0/dsh-bridge-v0.1.0-android.apk)（约 98.3 MiB）和 [SHA-256 校验文件](https://github.com/dsh-tauri/dsh-bridge-mobile/releases/download/v0.1.0/SHA256SUMS.txt)。仓库为私有，下载需拥有访问权限。本次为**开发签名预发布**，仅供测试；[原生 Release CI](https://github.com/dsh-tauri/dsh-bridge-mobile/actions/runs/37063335612) 的构建、签名/对齐验证和发布全部成功，下载后 SHA-256 已核对一致。
 
-`v0.1.1` / Android versionCode `2` 包含连接误判与文档导航修复、全页抽屉手势、统一按钮/列表与三行原始 SVG 品牌。发布候选已通过 489 项测试的五次独立运行及随机顺序、15 个代表性变异、typecheck、零警告 lint、Android export 和 prebuild。用户已批准推送发布；新 APK 在真实 Release 成功并核验后更新此处，旧 `v0.1.0` APK 不包含本轮调整。
+最新 [v0.1.1 Release](https://github.com/dsh-tauri/dsh-bridge-mobile/releases/tag/v0.1.1) 已发布：[下载 Android APK](https://github.com/dsh-tauri/dsh-bridge-mobile/releases/download/v0.1.1/dsh-bridge-v0.1.1-android.apk)（约 98.3 MiB）、[SHA-256 校验文件](https://github.com/dsh-tauri/dsh-bridge-mobile/releases/download/v0.1.1/SHA256SUMS.txt) 和 [第三方声明](https://github.com/dsh-tauri/dsh-bridge-mobile/releases/download/v0.1.1/THIRD_PARTY_NOTICES.md)。版本 `0.1.1` / Android versionCode `2` 包含连接误判与文档导航修复、全页抽屉手势、统一按钮/列表与三行原始 SVG 品牌。489 项测试的五次独立运行及随机顺序、15 个代表性变异、typecheck、零警告 lint、Android export 和 prebuild 均通过；[常规 CI](https://github.com/dsh-tauri/dsh-bridge-mobile/actions/runs/37078447716) 与 [真实 APK Release](https://github.com/dsh-tauri/dsh-bridge-mobile/actions/runs/37078453077) 全部成功。
+
+已下载核验 APK：SHA-256 `74289ad8029de56fd4f111c0e479630bfa8e30bbfd728720eefc33f4e929dd0c` 与发布校验文件和 GitHub digest 一致，完整声明已嵌入。新旧 APK 使用相同开发签名证书、相同包名，versionCode 从 `1` 增至 `2`，符合覆盖更新的签名与版本条件；实际设备升级仍待验收。新包仍为**开发签名预发布**，旧 `v0.1.0` APK 不包含本轮调整。
 
 按用户要求先完成远端 APK，截至发布完成时本地 SDK 尚未安装。APK 安装、签名升级、16 KB 真机和手势/相机/通知行为尚待设备验收，完整状态见 [验证记录](docs/validation.md)。

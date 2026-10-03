@@ -124,9 +124,9 @@ Clean-checkout 检查暴露了仅靠被忽略的 Expo 生成类型声明才能�
 
 没有把语法、import、收集、未处理异常或 runner 失败算作击杀。44 个保护文件在运行前后的 SHA-256 不变；没有改写生产源码或测试。详细本地证据：[connection-mutation-results.json](../.temp/connection-mutation-results.json)、[connection-mutation-check.mjs](../.temp/connection-mutation-check.mjs)。这些临时文件不入库，结果不等于 Android 真机验证。
 
-## v0.1.1 发布候选：UI、文档导航与声明打包（2026-10-03）
+## v0.1.1 发布验证：UI、文档导航与声明打包（2026-10-03）
 
-本节为最新候选结果；上方 469 / 481 项表保留各阶段历史，不代表最新测试数量。版本 `0.1.1`、Android versionCode `2`，用户已批准推送与 APK 发布；本地 SDK 仍未安装。
+本节为最新版本验证结果；上方 469 / 481 项表保留各阶段历史，不代表最新测试数量。版本 `0.1.1`、Android versionCode `2` 已经授权推送与 APK 发布，并完成真实产物核验；本地 SDK 仍未安装。
 
 - 页面全宽作为原生 right/slide Drawer 的 `swipeEdgeWidth`，保留原生横向阈值和纵向失败规则；尺寸变化跟随 `useWindowDimensions`，不增加自定义手势层，抽屉开关仍不重挂 WebView。
 - 首页最近连接与扫码按钮同为描边，自动扫描增加对比色雷达图标；当前/最近连接使用相同标题及列表项，无当前卡片、行内刷新或可用状态文字，状态仍有圆点与无障碍描述。最近标题右侧刷新复用真实 singleflight 探测，不重新连接网页。
@@ -144,7 +144,7 @@ Clean-checkout 检查暴露了仅靠被忽略的 Expo 生成类型声明才能�
 | Android export      | 清缓存后通过，4094 modules、27 assets、Hermes 7,297,673 bytes                              |
 | Android prebuild    | `--platform android --no-install` 通过；Android versionName `0.1.1`、versionCode `2`       |
 | 工作流检查          | actionlint 1.7.12 通过（Windows 未运行 shellcheck/pyflakes）                               |
-| 新 APK / 设备       | 等待远端真实 Release 与产物核验；设备验收未执行                                            |
+| 新 APK / 设备       | 远端 Release、下载校验和、签名证书及内嵌声明核验通过；设备验收未执行                       |
 
 最终本地 Hermes bundle（不是 APK）SHA-256：
 
@@ -222,5 +222,17 @@ Clean-checkout 检查暴露了仅靠被忽略的 Expo 生成类型声明才能�
 - [APK](https://github.com/dsh-tauri/dsh-bridge-mobile/releases/download/v0.1.0/dsh-bridge-v0.1.0-android.apk) 大小 `103110816` bytes；[SHA256SUMS.txt](https://github.com/dsh-tauri/dsh-bridge-mobile/releases/download/v0.1.0/SHA256SUMS.txt) 与实际下载 APK 的 SHA-256 均为 `b7300f89e6c05388409c136afdc0d27ebff4a3cb58ab9232c52540ab64360d9f`，也与 GitHub asset digest 一致。
 - `apksigner verify --verbose` 通过，v2 scheme 为 true、signer 数为 1；`zipalign -c -P 16 4` 通过。APK metadata：包名 `com.dshtauri.dshbridge`、versionName `0.1.0`、versionCode `1`、minSdk `24`、target/compileSdk `36`、ABI `arm64-v8a` / `armeabi-v7a` / `x86_64`。
 - 真机验收仍未执行；远端编译、签名/对齐验证与设备行为分开记录。
+
+### v0.1.1 UI 与连接修复发布
+
+- 用户批准推送发布后，提交 `c344e395ae4f76940f740b1d768230b0f2cefcef` 已推送到 `main`，标签 `v0.1.1` 指向该提交；包含前述 WebView 修复、原生 UI 调整和声明打包。
+- [常规 Ubuntu CI](https://github.com/dsh-tauri/dsh-bridge-mobile/actions/runs/37078447716) 全部成功，普通与随机测试各 14 文件、489/489 通过；类型、lint、依赖兼容、export 与 prebuild 通过。
+- [真实 APK Release](https://github.com/dsh-tauri/dsh-bridge-mobile/actions/runs/37078453077) 的 build 与 publish 全部成功；Gradle 输出 `BUILD SUCCESSFUL in 24m 22s`，上传前完成 v2 签名、16 KB zipalign、metadata 和 APK 内嵌声明检查。
+- [v0.1.1 Release](https://github.com/dsh-tauri/dsh-bridge-mobile/releases/tag/v0.1.1) 于 `2026-10-03T00:03:18Z`（北京时间 08:03:18）发布，非 draft、开发签名 prerelease；仓库私有，下载需访问权限。
+- 实际下载 [APK](https://github.com/dsh-tauri/dsh-bridge-mobile/releases/download/v0.1.1/dsh-bridge-v0.1.1-android.apk) 为 `103098948` bytes。SHA-256 `74289ad8029de56fd4f111c0e479630bfa8e30bbfd728720eefc33f4e929dd0c` 与 [SHA256SUMS.txt](https://github.com/dsh-tauri/dsh-bridge-mobile/releases/download/v0.1.1/SHA256SUMS.txt) 及 GitHub asset digest 一致。
+- 下载的 [第三方声明](https://github.com/dsh-tauri/dsh-bridge-mobile/releases/download/v0.1.1/THIRD_PARTY_NOTICES.md) 为 `1688` bytes，SHA-256 `ce34ee1fa2f2c760dca5b6f63362e41fb80b0388f41ef25cac643329f2e3b5f7` 与校验文件/GitHub digest 一致；实际 APK 的 `assets/app.config` 中完整文本与该附件逐字一致，并与源码声明一致。
+- `apksigner verify --verbose --print-certs` 通过，v2 scheme 为 true、signer 数为 1。新旧下载 APK 的 v2 certificate 均为 `CN=Android Debug`，SHA-256 `fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c`，与 CI 验证结果一致。证书提取只用于新旧比较，不替代 CI 的密码学签名验证。
+- 实际 APK 包名 `com.dshtauri.dshbridge`、versionName `0.1.1`、versionCode `2`、minSdk `24`、target/compileSdk `36`；包含 `arm64-v8a` / `armeabi-v7a` / `x86_64`。与 v0.1.0 相同包名和证书且 versionCode `1 → 2`，满足覆盖更新的签名与版本条件；实际设备升级、连接和手势效果仍待验收。
+- 本轮未安装本地 Android SDK、未修改上游。正式证书、真机 16 KB 和 iOS 仍保留上述未完成状态。
 
 本地成果和规范见 [README](../README.md) 与 [开发规则](../AGENTS.md)。
