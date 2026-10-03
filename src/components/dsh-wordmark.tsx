@@ -16,7 +16,7 @@ export function DshWordmark() {
         <Path d="M113.5 4.62817H111.104V18.6217H113.5V4.62817Z" fill={foreground} />
         <Path d="M117.589 12.8154L121.517 18.6208H118.554L114.625 12.8154L118.554 8.15088H121.517L117.589 12.8154Z" fill={foreground} />
       </Svg>
-      <Svg width={104} height={28} viewBox="129.348 5.5 52 14" accessibilityRole="image" accessibilityLabel="Harness">
+      <Svg width={88} height={88 * 14 / 52} viewBox="129.348 5.5 52 14" accessibilityRole="image" accessibilityLabel="Harness">
         <Rect x="129.348" y="5.5" width="52" height="14" rx="2" fill={foreground} />
         <G clipPath="url(#dsh-wordmark-badge-clip)">
           <Path d="M132.848 8.93205H134.08V16.137H132.848V8.93205ZM136.5 8.93205H137.732V16.137H136.5V8.93205ZM133.365 13.024V11.99H137.193V13.024H133.365Z" fill={background} />

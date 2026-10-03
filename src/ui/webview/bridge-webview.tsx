@@ -7,10 +7,11 @@ import { Button } from 'heroui-native/button'
 import { useThemeColor } from 'heroui-native/hooks'
 import { useEffect, useRef, useState } from 'react'
 import { If, Then } from 'react-if-lite'
-import { BackHandler, Linking, Pressable, Text, View } from 'react-native'
-import { ArrowLeft, Hand, PanelRightOpen } from 'react-native-lucide'
+import { BackHandler, Linking, Modal, Pressable, Text, View } from 'react-native'
+import { ArrowLeft, Hand } from 'react-native-lucide'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
+import { Uniwind } from 'uniwind'
 import { useStore } from 'valtio-define'
 import { DotsLoader } from '@/components/dots-loader'
 import { WEBVIEW_LOAD_TIMEOUT_MS } from '@/config/constants'
@@ -28,12 +29,13 @@ export function BridgeWebView({ address, generation }: { address: BridgeAddress,
   const mainUrlRef = useRef(buildConnectUrl(address))
   const canGoBackRef = useRef(false)
   const focusRequestRef = useRef<{ requestId: string, focus: NotificationFocus } | null>(null)
+  const documentReadyRef = useRef(false)
   const [documentReady, setDocumentReady] = useState(false)
   const [documentGeneration, setDocumentGeneration] = useState(0)
   const state = useStore(connection)
   const navigation = useNavigation()
   const appState = useAppState()
-  const [background, foreground] = useThemeColor(['background', 'foreground'])
+  const background = useThemeColor('background')
   const shim = createNotificationShim(address.id, nonce)
   // keep:effect Mirror native visibility into the authenticated loaded document.
   useEffect(() => {
@@ -44,6 +46,11 @@ export function BridgeWebView({ address, generation }: { address: BridgeAddress,
       hidden: appState !== 'active',
     }))
   }, [address.id, appState, documentReady, nonce, state.loadError])
+  // keep:effect Request native notification access only while a verified document is in the foreground.
+  useEffect(() => {
+    if (documentReady && !state.loadError && appState === 'active')
+      void requestNotificationAccess()
+  }, [appState, documentReady, state.loadError])
   // keep:effect Keep notification focus pending until the loaded page acknowledges selection.
   useEffect(() => {
     const focus = state.pendingFocus
@@ -112,10 +119,15 @@ export function BridgeWebView({ address, generation }: { address: BridgeAddress,
     if (message.type === 'dsh://bridge-ready') {
       if (connection.loadError)
         return
+      documentReadyRef.current = true
       setDocumentReady(true)
       connection.markLoaded(generation)
-      if (appState === 'active')
-        void requestNotificationAccess()
+      return
+    }
+    if (!documentReadyRef.current || connection.loadError)
+      return
+    if (message.type === 'dsh://theme-state') {
+      Uniwind.setTheme(message.theme)
       return
     }
     if (message.type === 'dsh://focus-result') {
@@ -140,6 +152,7 @@ export function BridgeWebView({ address, generation }: { address: BridgeAddress,
     if (!loading)
       return
     focusRequestRef.current = null
+    documentReadyRef.current = false
     setDocumentReady(false)
     setDocumentGeneration(value => value + 1)
   }
@@ -202,11 +215,6 @@ export function BridgeWebView({ address, generation }: { address: BridgeAddress,
             </Pressable>
           </Then>
         </If>
-        <View className="absolute bottom-4 right-3">
-          <Button variant="outline" isIconOnly className="bg-surface" accessibilityLabel={copy.openDrawer} onPress={openDrawer}>
-            <PanelRightOpen size={21} color={foreground} />
-          </Button>
-        </View>
         <If cond={state.loading}>
           <Then>
             <View className="absolute inset-0 items-center justify-center gap-5 bg-background">
@@ -224,20 +232,28 @@ export function BridgeWebView({ address, generation }: { address: BridgeAddress,
             </View>
           </Then>
         </If>
-        <If cond={state.swipeHintVisible}>
+        <If cond={documentReady && state.swipeHintVisible && !state.drawerOpen}>
           <Then>
-            <Pressable
-              className="absolute inset-0 items-center justify-center gap-5 bg-black/60"
-              accessibilityRole="button"
-              accessibilityLabel={copy.swipeAccessibility}
-              onPress={() => connection.dismissHint()}
+            <Modal
+              transparent
+              visible
+              statusBarTranslucent
+              navigationBarTranslucent
+              onRequestClose={() => connection.dismissHint()}
             >
-              <View className="flex-row items-center gap-3">
-                <ArrowLeft size={34} color="#ffffff" />
-                <Hand size={52} color="#ffffff" strokeWidth={1.5} />
-              </View>
-              <Text className="text-base font-medium text-white">{copy.swipeHint}</Text>
-            </Pressable>
+              <Pressable
+                className="flex-1 items-center justify-center gap-5 bg-black/60"
+                accessibilityRole="button"
+                accessibilityLabel={copy.swipeAccessibility}
+                onPress={() => connection.dismissHint()}
+              >
+                <View className="flex-row items-center gap-3">
+                  <ArrowLeft size={34} color="#ffffff" />
+                  <Hand size={52} color="#ffffff" strokeWidth={1.5} />
+                </View>
+                <Text className="text-base font-medium text-white">{copy.swipeHint}</Text>
+              </Pressable>
+            </Modal>
           </Then>
         </If>
       </View>

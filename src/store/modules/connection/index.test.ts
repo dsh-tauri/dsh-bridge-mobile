@@ -105,11 +105,11 @@ describe('parseConnectionSnapshot trust boundary', () => {
 })
 
 describe('connection hydration', () => {
-  it('starts each real store with an isolated empty scanning state', () => {
+  it('starts each real store with an isolated empty method-selection state', () => {
     const store = createConnectionStore()
     expect(store.$state).toEqual({
       hydrated: false,
-      stage: 'scanning',
+      stage: 'idle',
       current: null,
       history: [],
       tokens: {},
@@ -143,7 +143,7 @@ describe('connection hydration', () => {
     expect(store.guidedHosts).toEqual(['http://bridge.local:3080'])
     expect(store.tokens).toEqual({ 'http://bridge.local:3080': 'secure-secret' })
     expect(store.current).toBeNull()
-    expect(store.stage).toBe('scanning')
+    expect(store.stage).toBe('idle')
     expect(store.scanGeneration).toBe(0)
     expect(store.viewGeneration).toBe(0)
   })
@@ -354,6 +354,21 @@ describe('connection hints, disconnect and serialization', () => {
     load(store, { ...alpha, id: 'http://bridge.local:3082', url: 'http://bridge.local:3082/', port: 3082 }, 3)
     expect(store.swipeHintVisible).toBe(true)
     expect(store.guidedHosts).toEqual(['http://bridge.local:3080'])
+  })
+
+  it('cannot record an unseen guide as dismissed while the first document is loading or failed', () => {
+    const store = createConnectionStore()
+    store.accept(alpha)
+    store.dismissHint()
+    expect(store.guidedHosts).toEqual([])
+    store.markLoadFailed(store.viewGeneration, 'Network unavailable')
+    store.dismissHint()
+    expect(store.guidedHosts).toEqual([])
+    load(store, alpha, 10)
+    expect(store.swipeHintVisible).toBe(true)
+    store.dismissHint()
+    expect(store.guidedHosts).toEqual(['http://bridge.local:3080'])
+    expect(store.swipeHintVisible).toBe(false)
   })
 
   it('does not record a dismissed hint when no current host exists', () => {

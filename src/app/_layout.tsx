@@ -41,9 +41,10 @@ export default function RootLayout() {
         return
       unsubscribePersistence = bindConnectionPersistence()
       focusRequested()
-      if (connection.stage === 'scanning')
-        void startAutoScan()
-      void refreshHealth()
+      if (connection.stage === 'idle' && connection.history.length > 0)
+        void startAutoScan({ historyOnly: true })
+      else
+        void refreshHealth()
     }
     void initialize()
     const healthTimer = setInterval(() => {

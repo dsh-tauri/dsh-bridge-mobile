@@ -88,7 +88,7 @@ describe('restoreConnections', () => {
     expect(connection.tokens).toEqual({ 'http://bridge.local:3080': 'secure-alpha' })
     expect(connection.guidedHosts).toEqual(['http://bridge.local:3080'])
     expect(connection.current).toBeNull()
-    expect(connection.stage).toBe('scanning')
+    expect(connection.stage).toBe('idle')
     expect(native.write).not.toHaveBeenCalled()
     expect(native.writeToken).not.toHaveBeenCalled()
     expect(native.deleteToken).not.toHaveBeenCalled()

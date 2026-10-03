@@ -27,6 +27,7 @@ vi.mock('react-native', () => ({
   View: 'View',
   Text: 'Text',
   Image: 'Image',
+  Modal: 'Modal',
   ScrollView: 'ScrollView',
   Pressable: 'Pressable',
   Platform: { OS: 'android' },
@@ -50,6 +51,7 @@ vi.mock('react-native', () => ({
     },
   },
 }))
+vi.mock('uniwind', () => ({ Uniwind: { setTheme: vi.fn() } }))
 vi.mock('expo-router', () => ({ router: { push: native.push }, useNavigation: () => native.navigation }))
 vi.mock('expo-network', () => ({ getIpAddressAsync: native.getIpAddressAsync }))
 vi.mock('expo-crypto', () => ({ randomUUID: () => 'home-test-nonce' }))
@@ -76,7 +78,7 @@ vi.mock('heroui-native/button', async () => {
   return { Button: Object.assign(Button, { Label: 'Text' }) }
 })
 vi.mock('react-native-safe-area-context', () => ({ SafeAreaView: 'SafeAreaView' }))
-vi.mock('react-native-lucide', () => ({ History: 'HistoryIcon', Radar: 'RadarIcon', QrCode: 'QrCodeIcon', ScanLine: 'ScanLineIcon', RefreshCw: 'RefreshIcon', X: 'Icon', ArrowLeft: 'Icon', Hand: 'Icon', PanelRightOpen: 'Icon' }))
+vi.mock('react-native-lucide', () => ({ History: 'HistoryIcon', Radar: 'RadarIcon', QrCode: 'QrCodeIcon', ScanLine: 'ScanLineIcon', RefreshCw: 'RefreshIcon', X: 'Icon', ArrowLeft: 'Icon', Hand: 'Icon' }))
 vi.mock('react-native-reanimated', async () => {
   const { useRef } = await import('react')
   return {
@@ -268,7 +270,7 @@ describe('rendered Home scanning and idle actions', () => {
       scanning = runtime.startAutoScan()
     })
     await mount()
-    expect(texts()).toContain('正在检测历史连接及局域网端口...')
+    expect(texts()).toContain('寻找可用连接')
     expect(root().findAll(node => node.props.accessibilityRole === 'progressbar')).toHaveLength(1)
     const signal = native.fetch.mock.calls[0]![1]!.signal!
 
@@ -276,8 +278,8 @@ describe('rendered Home scanning and idle actions', () => {
     await scanning
 
     expect(signal.aborted).toBe(true)
-    expect(texts()).not.toContain('正在检测历史连接及局域网端口...')
-    expect(button('自动扫描').props.isDisabled).toBe(false)
+    expect(texts()).not.toContain('寻找可用连接')
+    expect(button('自动扫描局域网').props.isDisabled).toBe(false)
     expect(button('扫码连接').props.isDisabled).toBe(false)
     expect(button('最近连接').props.isDisabled).toBe(false)
     await act(async () => {
@@ -289,7 +291,7 @@ describe('rendered Home scanning and idle actions', () => {
   it('keeps idle actions and drawer swipes disabled until hydration completes', async () => {
     connection.cancelScan()
     await mount()
-    for (const label of ['自动扫描', '扫码连接', '最近连接'])
+    for (const label of ['自动扫描局域网', '扫码连接', '最近连接'])
       expect(button(label).props.isDisabled).toBe(true)
     expect(drawer().props.swipeEnabled).toBe(false)
 
@@ -297,7 +299,7 @@ describe('rendered Home scanning and idle actions', () => {
       hydrate()
     })
 
-    for (const label of ['自动扫描', '扫码连接', '最近连接'])
+    for (const label of ['自动扫描局域网', '扫码连接', '最近连接'])
       expect(button(label).props.isDisabled).toBe(false)
     expect(drawer().props.swipeEnabled).toBe(true)
   })
@@ -309,7 +311,7 @@ describe('rendered Home scanning and idle actions', () => {
     connection.cancelScan()
     await mount()
 
-    await press('自动扫描')
+    await press('自动扫描局域网')
 
     expect(texts()).toContain('扫描局域网端口中...')
     expect(root().findAll(node => String(node.type) === 'Button').map(text)).toEqual(['取消'])
@@ -317,7 +319,7 @@ describe('rendered Home scanning and idle actions', () => {
       ip.resolve('0.0.0.0')
     })
     expect(texts()).toContain('无法获取局域网 IPv4 地址，请连接 Wi-Fi 或使用扫码连接。')
-    expect(button('自动扫描').props.isDisabled).toBe(false)
+    expect(button('自动扫描局域网').props.isDisabled).toBe(false)
   })
 
   it('uses a scanning-frame icon rather than a QR-code image at both scanner entry points', async () => {
@@ -340,7 +342,7 @@ describe('rendered Home scanning and idle actions', () => {
 
     expect(button('扫码连接').props).toMatchObject({ variant: 'outline', size: 'lg' })
     expect(button('最近连接').props).toMatchObject({ variant: 'outline', size: 'lg' })
-    expect(button('自动扫描').find(node => String(node.type) === 'RadarIcon').props).toMatchObject({ size: 20, color: '#ffffff' })
+    expect(button('自动扫描局域网').find(node => String(node.type) === 'RadarIcon').props).toMatchObject({ size: 20, color: '#ffffff' })
     expect(button('最近连接').findAll(node => String(node.type) === 'HistoryIcon')).toHaveLength(1)
 
     native.theme = { 'background': '#151517', 'foreground': '#f9fafb', 'accent-foreground': '#0f1115' }
@@ -348,7 +350,7 @@ describe('rendered Home scanning and idle actions', () => {
       screen!.update(createElement(HomeScreen))
     })
 
-    expect(button('自动扫描').find(node => String(node.type) === 'RadarIcon').props.color).toBe('#0f1115')
+    expect(button('自动扫描局域网').find(node => String(node.type) === 'RadarIcon').props.color).toBe('#0f1115')
     expect(button('扫码连接').findAll(node => String(node.type) === 'ScanLineIcon').map(node => node.props.color)).toEqual(['#f9fafb'])
   })
 
@@ -366,6 +368,7 @@ describe('rendered Home scanning and idle actions', () => {
     expect(logos[0]!.find(node => String(node.type) === 'SvgPath').props.fill).toBe('#0f1115')
     expect(logos[1]!.findAll(node => String(node.type) === 'SvgPath')).toHaveLength(9)
     expect(logos[1]!.findAll(node => String(node.type) === 'SvgPath').every(node => node.props.fill === '#0f1115')).toBe(true)
+    expect(logos[2]!.props).toMatchObject({ width: 88, height: 23.692307692307693 })
     expect(logos[2]!.findAll(node => String(node.type) === 'SvgPath')).toHaveLength(7)
     expect(logos[2]!.findAll(node => String(node.type) === 'SvgPath').every(node => node.props.fill === '#ffffff')).toBe(true)
     expect(texts()).not.toContain('DeepSeek')
@@ -373,7 +376,7 @@ describe('rendered Home scanning and idle actions', () => {
 
     native.theme = { 'background': '#151517', 'foreground': '#f9fafb', 'accent-foreground': '#0f1115' }
     await act(async () => {
-      connection.cancelScan()
+      screen!.update(createElement(HomeScreen))
     })
 
     const idleLogos = root().findAll(node => String(node.type) === 'Svg')
@@ -434,6 +437,73 @@ describe('rendered Home connection drawer', () => {
     expect(texts()).not.toContain('seven.local:3080')
     expect(button('断开连接').props.isDisabled).toBe(true)
     expect(button('重新连接').props.isDisabled).toBe(true)
+  })
+
+  it('keeps the connected page free of permanent drawer controls before and after its full-screen first-use guide', async () => {
+    hydrate()
+    runtime.connectAddress(alpha)
+    await mount()
+    const { WebView } = await import('react-native-webview')
+    const instance = root().findByType(WebView).instance
+    expect(root().findAll(node => node.props.accessibilityLabel === '打开连接信息')).toHaveLength(0)
+    expect(root().findAll(node => String(node.type) === 'Modal')).toHaveLength(0)
+
+    await ready()
+
+    const modals = root().findAll(node => String(node.type) === 'Modal')
+    expect(modals).toHaveLength(1)
+    expect(modals[0]!.props).toMatchObject({ transparent: true, visible: true, statusBarTranslucent: true, navigationBarTranslucent: true })
+    expect(modals[0]!.findAll(node => String(node.type) === 'Pressable').map(node => node.props.className)).toEqual(['flex-1 items-center justify-center gap-5 bg-black/60'])
+    expect(modals[0]!.findAll(node => String(node.type) === 'Text').map(text)).toContain('向左滑查看连接信息')
+    await act(async () => {
+      modals[0]!.find(node => String(node.type) === 'Pressable').props.onPress()
+    })
+
+    expect(root().findAll(node => String(node.type) === 'Modal')).toHaveLength(0)
+    expect(root().findAll(node => node.props.accessibilityLabel === '打开连接信息')).toHaveLength(0)
+    expect(root().findByType(WebView).instance).toBe(instance)
+    expect(connection.guidedHosts).toEqual(['http://one.local:3080'])
+    await act(async () => {
+      drawer().props.onOpen()
+      drawer().props.onClose()
+    })
+    expect(root().findByType(WebView).instance).toBe(instance)
+    expect(root().findAll(node => String(node.type) === 'Modal')).toHaveLength(0)
+  })
+
+  it('does not consume first-use guidance when the drawer is opened before the page is ready', async () => {
+    hydrate()
+    runtime.connectAddress(alpha)
+    await mount()
+    await act(async () => {
+      drawer().props.onOpen()
+    })
+    expect(connection.guidedHosts).toEqual([])
+    await ready()
+    expect(root().findAll(node => String(node.type) === 'Modal')).toHaveLength(0)
+    await act(async () => {
+      drawer().props.onClose()
+    })
+
+    const modals = root().findAll(node => String(node.type) === 'Modal')
+    expect(modals).toHaveLength(1)
+    expect(modals[0]!.findAll(node => String(node.type) === 'Text').map(text)).toContain('向左滑查看连接信息')
+    await act(async () => {
+      modals[0]!.props.onRequestClose()
+    })
+    expect(connection.guidedHosts).toEqual(['http://one.local:3080'])
+    expect(root().findAll(node => String(node.type) === 'Modal')).toHaveLength(0)
+  })
+
+  it('keeps the drawer heading close to the current connection without restoring a card wrapper', async () => {
+    hydrate()
+    connection.cancelScan()
+    await mount()
+    await press('最近连接')
+
+    const heading = root().findAll(node => String(node.type) === 'View').find(node => node.findAll(child => String(child.type) === 'Button' && child.props.accessibilityLabel === '扫码连接').length === 1 && node.findAll(child => String(child.type) === 'Text').map(text).includes('连接信息') && node.props.className?.includes('justify-between'))
+    expect(heading?.props.className).toBe('flex-row items-center justify-between px-5 pb-1 pt-2')
+    expect(button('重新连接').props.className).toBe('h-auto min-h-16 justify-start gap-3 rounded-xl px-3 py-4')
   })
 
   it('uses the same title-and-item style for current and recent hosts with only status dots in the rows', async () => {
@@ -508,7 +578,7 @@ describe('rendered Home connection drawer', () => {
 
     expect(drawer().props.open).toBe(false)
     expect(webView().props.source).toEqual({ uri: 'http://one.local:3080/tasks?auth=saved-token' })
-    expect(texts()).toContain('正在连接...')
+    expect(texts()).toContain('寻找可用连接')
     expect(connection.stage).toBe('connected')
   })
 
@@ -531,7 +601,7 @@ describe('rendered Home connection drawer', () => {
     expect(signal.aborted).toBe(true)
     expect(native.push).toHaveBeenCalledExactlyOnceWith('/scan')
     expect(drawer().props.open).toBe(false)
-    expect(button('自动扫描').props.isDisabled).toBe(false)
+    expect(button('自动扫描局域网').props.isDisabled).toBe(false)
   })
 
   it('disconnects the displayed host back to visible scanning without losing successful history', async () => {
@@ -539,14 +609,16 @@ describe('rendered Home connection drawer', () => {
     runtime.connectAddress(alpha)
     await mount()
     await ready()
-    await press('打开连接信息')
+    await act(async () => {
+      drawer().props.onOpen()
+    })
     holdNetwork()
 
     await press('断开连接')
 
     expect(root().findAll(node => String(node.type) === 'WebView')).toHaveLength(0)
     expect(drawer().props.open).toBe(false)
-    expect(texts()).toContain('正在检测历史连接及局域网端口...')
+    expect(texts()).toContain('寻找可用连接')
     expect(button('取消').props.isDisabled).not.toBe(true)
     expect(connection.current).toBeNull()
     expect(connection.history.map(entry => entry.id)).toEqual(['http://one.local:3080'])
@@ -586,13 +658,15 @@ describe('rendered Home connection drawer', () => {
       drawer().props.onClose()
     })
     expect(root().findByType(WebView).instance).toBe(instance)
-    await press('打开连接信息')
+    await act(async () => {
+      drawer().props.onOpen()
+    })
     expect(root().findByType(WebView).instance).toBe(instance)
     await press('关闭连接信息')
 
     expect(root().findByType(WebView).instance).toBe(instance)
     expect(webView().props.source).toEqual({ uri: 'http://one.local:3080/tasks?auth=saved-token' })
-    expect(texts()).not.toContain('正在连接...')
+    expect(texts()).not.toContain('寻找可用连接')
   })
 })
 

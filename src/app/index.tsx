@@ -42,7 +42,7 @@ function ConnectionDrawer() {
     currentStatus = state.health[state.current.id] ?? 'checking'
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: background }} edges={['top', 'bottom', 'right']}>
-      <View className="flex-row items-center justify-between px-5 pb-5 pt-3">
+      <View className="flex-row items-center justify-between px-5 pb-1 pt-2">
         <Text className="text-xl font-semibold text-foreground">{copy.connectionInfo}</Text>
         <Button variant="ghost" isIconOnly isDisabled={!state.hydrated} accessibilityLabel={copy.scanQr} onPress={openScanner}>
           <ScanLine size={22} color={foreground} />

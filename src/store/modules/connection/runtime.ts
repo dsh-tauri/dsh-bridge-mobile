@@ -31,7 +31,7 @@ export function connectAddress(address: BridgeAddress): void {
   connection.accept(withSavedToken(address))
 }
 
-export async function startAutoScan(skipId?: string): Promise<void> {
+export async function startAutoScan({ skipId, historyOnly = false }: { skipId?: string, historyOnly?: boolean } = {}): Promise<void> {
   cancelAutoScan()
   const controller = new AbortController()
   scanController = controller
@@ -63,6 +63,10 @@ export async function startAutoScan(skipId?: string): Promise<void> {
       }
       if (connection.accept(host, generation))
         return
+    }
+    if (historyOnly) {
+      connection.finishScan(generation, needsToken ? copy.tokenRequired : copy.noHistoryAvailable)
+      return
     }
     const selfIp = await Network.getIpAddressAsync()
     if (controller.signal.aborted || generation !== connection.scanGeneration)
@@ -126,7 +130,7 @@ export async function startAutoScan(skipId?: string): Promise<void> {
 export function disconnectAndScan(): void {
   const previousId = connection.current?.id
   connection.disconnect()
-  void startAutoScan(previousId)
+  void startAutoScan({ skipId: previousId })
 }
 
 export async function refreshHealth(): Promise<void> {

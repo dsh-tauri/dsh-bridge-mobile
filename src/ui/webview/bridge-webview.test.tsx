@@ -18,11 +18,13 @@ const native = vi.hoisted(() => ({
   setNotificationChannelAsync: vi.fn<(...args: unknown[]) => Promise<null>>(),
   scheduleNotificationAsync: vi.fn<(...args: unknown[]) => Promise<string>>(),
   cancelAnimation: vi.fn(),
+  setTheme: vi.fn<(theme: 'light' | 'dark' | 'system') => void>(),
 }))
 
 vi.mock('react-native', () => ({
   View: 'View',
   Text: 'Text',
+  Modal: 'Modal',
   Pressable: 'Pressable',
   Platform: { OS: 'android' },
   Linking: { openURL: native.openURL },
@@ -44,6 +46,7 @@ vi.mock('react-native', () => ({
     },
   },
 }))
+vi.mock('uniwind', () => ({ Uniwind: { setTheme: native.setTheme } }))
 vi.mock('expo-router', () => ({ useNavigation: () => native.navigation }))
 vi.mock('expo-crypto', () => ({ randomUUID: native.randomUUID }))
 vi.mock('expo-network', () => ({ getIpAddressAsync: vi.fn<() => Promise<string>>() }))
@@ -54,7 +57,7 @@ vi.mock('expo-notifications', () => ({
   setNotificationChannelAsync: native.setNotificationChannelAsync,
   scheduleNotificationAsync: native.scheduleNotificationAsync,
 }))
-vi.mock('heroui-native/hooks', () => ({ useThemeColor: (names: string[]) => names.map(() => '#ffffff') }))
+vi.mock('heroui-native/hooks', () => ({ useThemeColor: (names: string | string[]) => Array.isArray(names) ? names.map(() => '#ffffff') : '#ffffff' }))
 vi.mock('heroui-native/button', async () => {
   const { createElement } = await import('react')
   function Button({ children, ...props }: { children?: ReactNode }) {
@@ -62,7 +65,7 @@ vi.mock('heroui-native/button', async () => {
   }
   return { Button }
 })
-vi.mock('react-native-lucide', () => ({ ArrowLeft: 'Icon', Hand: 'Icon', PanelRightOpen: 'Icon' }))
+vi.mock('react-native-lucide', () => ({ ArrowLeft: 'Icon', Hand: 'Icon' }))
 vi.mock('react-native-safe-area-context', () => ({ SafeAreaView: 'SafeAreaView' }))
 vi.mock('react-native-reanimated', async () => {
   const { useRef } = await import('react')
@@ -105,6 +108,7 @@ let screen: ReactTestRenderer | undefined
 let connection: typeof import('@/store/modules/connection').connection
 let runtime: typeof import('@/store/modules/connection/runtime')
 let BridgeWebView: typeof import('./bridge-webview').BridgeWebView
+const pages: Array<Pick<EventTarget, 'dispatchEvent'>> = []
 
 interface NativeViewRef {
   injectJavaScript: ReturnType<typeof vi.fn<(script: string) => void>>
@@ -206,23 +210,37 @@ class BrowserMessageEvent extends Event {
 function createPage(selectSession?: (sessionId: string) => void, kind: 'app' | 'login' | 'unverified' = 'app') {
   const posts: string[] = []
   const events = new EventTarget()
+  const documentEvents = new EventTarget()
   const window = {
     top: null as unknown,
     __DSH_BOOT__: kind === 'app' ? {} : undefined,
     __dshClientCtx: kind === 'app' ? { uiWorkspace: { openSession: selectSession } } : undefined,
     ReactNativeWebView: { postMessage: (raw: string) => posts.push(raw) },
     addEventListener: (type: string, listener: EventListener, options?: AddEventListenerOptions) => events.addEventListener(type, listener, options),
+    removeEventListener: (type: string, listener: EventListener, options?: EventListenerOptions) => events.removeEventListener(type, listener, options),
     dispatchEvent: (event: Event) => events.dispatchEvent(event),
   }
   window.top = window
+  pages.push(window)
+  const styles = new Map<string, { id: string, textContent: string }>()
   const document = {
     hidden: false,
     readyState: 'complete',
-    getElementById: (id: string) => kind === 'login' && id === 'loginForm' ? {} : null,
+    documentElement: { getAttribute: () => null },
+    body: null,
+    head: { appendChild: (style: { id: string, textContent: string }) => styles.set(style.id, style) },
+    createElement: () => ({ id: '', textContent: '' }),
+    getElementById: (id: string) => styles.get(id) ?? (kind === 'login' && id === 'loginForm' ? {} : null),
     querySelectorAll: () => [],
-    dispatchEvent: () => true,
+    addEventListener: (type: string, listener: EventListener, options?: AddEventListenerOptions) => documentEvents.addEventListener(type, listener, options),
+    removeEventListener: (type: string, listener: EventListener, options?: EventListenerOptions) => documentEvents.removeEventListener(type, listener, options),
+    dispatchEvent: (event: Event) => documentEvents.dispatchEvent(event),
   }
-  const context = createVmContext({ window, document, location: { origin: alpha.id }, Event, MessageEvent: BrowserMessageEvent, Date, setTimeout, clearTimeout })
+  class PageMutationObserver {
+    observe = vi.fn()
+    disconnect = vi.fn()
+  }
+  const context = createVmContext({ window, document, location: { origin: alpha.id }, MutationObserver: PageMutationObserver, Event, MessageEvent: BrowserMessageEvent, Date, setTimeout, clearTimeout })
   function run(script: string) {
     expect(runInContext(script, context, { timeout: 1000 })).toBe(true)
   }
@@ -262,6 +280,8 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  for (const page of pages.splice(0))
+    page.dispatchEvent(new Event('pagehide'))
   await unmount()
   runtime.stopConnectionRuntime()
   await vi.advanceTimersByTimeAsync(0)
@@ -285,7 +305,7 @@ describe('rendered Bridge WebView document lifecycle', () => {
 
     expect(view.injectJavaScript).toHaveBeenCalledExactlyOnceWith(webView().props.injectedJavaScript)
     expect(connection.loading).toBe(true)
-    expect(texts()).toContain('正在连接...')
+    expect(texts()).toContain('寻找可用连接')
     expect(connection.history).toEqual([])
     expect(connection.swipeHintVisible).toBe(false)
     expect(native.getPermissionsAsync).not.toHaveBeenCalled()
@@ -300,7 +320,7 @@ describe('rendered Bridge WebView document lifecycle', () => {
     expect(connection.history).toEqual([])
     expect(connection.guidedHosts).toEqual([])
     expect(texts()).toContain(failure)
-    expect(texts()).not.toContain('正在连接...')
+    expect(texts()).not.toContain('寻找可用连接')
     expect(texts()).not.toContain('向左滑查看连接信息')
     expect(native.getPermissionsAsync).not.toHaveBeenCalled()
   })
@@ -326,7 +346,7 @@ describe('rendered Bridge WebView document lifecycle', () => {
     expect(connection.loading).toBe(false)
     expect(connection.loadError).toBeNull()
     expect(texts()).toContain('向左滑查看连接信息')
-    expect(texts()).not.toContain('正在连接...')
+    expect(texts()).not.toContain('寻找可用连接')
     const hint = root().find(node => node.props.accessibilityLabel === '关闭滑动引导')
     await act(async () => {
       hint.props.onPress()
@@ -368,7 +388,7 @@ describe('rendered Bridge WebView document lifecycle', () => {
     expect(connection.history).toEqual([{ ...alpha, lastConnectedAt: 1767225600000 }])
     expect(connection.health['http://bridge.test:3080']).toBe('available')
     expect(texts()).not.toContain(failure)
-    expect(texts()).not.toContain('正在连接...')
+    expect(texts()).not.toContain('寻找可用连接')
   })
 
   it('does not accept an HTTP 401 document without a DSH login or application fingerprint', async () => {
@@ -439,7 +459,7 @@ describe('rendered Bridge WebView document lifecycle', () => {
     expect(connection.loadError).toBeNull()
     expect(connection.history).toEqual([{ ...alpha, lastConnectedAt: 1767225600000 }])
     expect(texts()).not.toContain(failure)
-    expect(texts()).not.toContain('正在连接...')
+    expect(texts()).not.toContain('寻找可用连接')
     expect(connection.swipeHintVisible).toBe(false)
   })
 
@@ -552,7 +572,7 @@ describe('rendered Bridge WebView document lifecycle', () => {
       await vi.advanceTimersByTimeAsync(19999)
     })
     expect(connection.loading).toBe(true)
-    expect(texts()).toContain('正在连接...')
+    expect(texts()).toContain('寻找可用连接')
     expect(texts()).not.toContain(failure)
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1)
@@ -669,6 +689,64 @@ describe('rendered Bridge WebView document lifecycle', () => {
     expect(connection.history).toEqual([])
     expect(texts()).toContain(failure)
     expect(root().findAll(node => String(node.type) === 'Button').map(text)).toContain('重新连接')
+  })
+})
+
+describe('rendered Bridge WebView verified native notification boundary', () => {
+  const notification = { type: 'dsh://native-notification', title: '完成', body: '轮次已完成', sessionId: 'alpha', tag: 'dsh-notification-alpha-1', silent: false }
+
+  it('does not schedule a same-origin notification before document readiness', async () => {
+    native.appState.currentState = 'background'
+    await mount()
+    await message(notification)
+    expect(native.scheduleNotificationAsync).not.toHaveBeenCalled()
+    expect(native.getPermissionsAsync).not.toHaveBeenCalled()
+  })
+
+  it('does not schedule a late completion after a document fails', async () => {
+    native.appState.currentState = 'background'
+    await mount()
+    await ready()
+    await act(async () => {
+      webView().props.onError({ nativeEvent: { code: -6 } })
+    })
+    await message(notification)
+    expect(connection.loadError).toBe(failure)
+    expect(native.scheduleNotificationAsync).not.toHaveBeenCalled()
+    expect(native.getPermissionsAsync).not.toHaveBeenCalled()
+  })
+
+  it('delivers one verified background notification while rejecting foreign sources and stale nonces', async () => {
+    native.appState.currentState = 'background'
+    await mount()
+    await ready()
+    await message(notification, { nonce: 'stale-nonce' })
+    await message(notification, { url: 'https://foreign.test/tasks' })
+    expect(native.scheduleNotificationAsync).not.toHaveBeenCalled()
+    await message(notification)
+    expect(native.scheduleNotificationAsync).toHaveBeenCalledOnce()
+    expect(native.scheduleNotificationAsync.mock.calls[0]?.[0]).toMatchObject({
+      content: { title: '完成', body: '轮次已完成', data: { origin: 'http://bridge.test:3080', sessionId: 'alpha', tag: 'dsh-notification-alpha-1' } },
+      trigger: { channelId: 'dsh-bridge' },
+    })
+  })
+})
+
+describe('rendered Bridge WebView foreground notification authorization', () => {
+  it('requests native permission when a document first becomes active after background readiness', async () => {
+    native.appState.currentState = 'background'
+    native.getPermissionsAsync.mockResolvedValue({ granted: false })
+    await mount()
+    await ready()
+    expect(native.getPermissionsAsync).not.toHaveBeenCalled()
+    expect(native.requestPermissionsAsync).not.toHaveBeenCalled()
+    await changeAppState('active')
+
+    expect(native.setNotificationChannelAsync.mock.calls.map(call => call[0])).toEqual(['dsh-bridge', 'dsh-bridge-silent'])
+    expect(native.getPermissionsAsync).toHaveBeenCalledExactlyOnceWith()
+    expect(native.requestPermissionsAsync).toHaveBeenCalledExactlyOnceWith()
+    const calls = [...native.setNotificationChannelAsync.mock.invocationCallOrder, ...native.getPermissionsAsync.mock.invocationCallOrder, ...native.requestPermissionsAsync.mock.invocationCallOrder]
+    expect(calls).toEqual([...calls].sort((a, b) => a - b))
   })
 })
 
@@ -906,6 +984,64 @@ describe('rendered Bridge WebView native navigation and resource boundaries', ()
     expect(connection.notice).toBe(failure)
     expect(connection.loadError).toBeNull()
     expect(connection.history).toEqual([])
+  })
+
+  it('applies only authenticated page theme updates from the current verified document without remounting WebView', async () => {
+    await mount()
+    const view = await viewRef()
+    await message({ type: 'dsh://theme-state', theme: 'light' })
+    expect(native.setTheme).not.toHaveBeenCalled()
+    await ready()
+    for (const options of [
+      { nonce: 'wrong' },
+      { origin: 'http://foreign.test:3080' },
+      { url: 'http://foreign.test:3080/' },
+      { channel: 'other' },
+    ]) {
+      await message({ type: 'dsh://theme-state', theme: 'dark' }, options)
+    }
+    await message({ type: 'dsh://theme-state', theme: 'sepia' })
+    expect(native.setTheme).not.toHaveBeenCalled()
+    for (const theme of ['light', 'dark', 'system'])
+      await message({ type: 'dsh://theme-state', theme })
+    expect(native.setTheme.mock.calls).toEqual([['light'], ['dark'], ['system']])
+    expect(await viewRef()).toBe(view)
+    expect(native.scheduleNotificationAsync).not.toHaveBeenCalled()
+    await act(async () => {
+      webView().props.onLoadStart({ nativeEvent: { url: alpha.url, loading: true } })
+    })
+    await message({ type: 'dsh://theme-state', theme: 'light' })
+    expect(native.setTheme).toHaveBeenCalledTimes(3)
+    await ready()
+    await act(async () => {
+      webView().props.onError({ nativeEvent: { code: -2 } })
+    })
+    await message({ type: 'dsh://theme-state', theme: 'light' })
+    expect(native.setTheme).toHaveBeenCalledTimes(3)
+  })
+
+  it('accepts the initial theme sent immediately after readiness before React commits state', async () => {
+    await mount()
+    await act(async () => {
+      const receive = webView().props.onMessage
+      for (const payload of [{ type: 'dsh://bridge-ready' }, { type: 'dsh://theme-state', theme: 'light' }]) {
+        receive({ nativeEvent: {
+          url: alpha.url,
+          data: JSON.stringify({ channel: 'dsh-bridge', origin: alpha.id, nonce, payload }),
+        } })
+      }
+    })
+    expect(native.setTheme).toHaveBeenCalledExactlyOnceWith('light')
+  })
+
+  it('ignores theme messages from a replaced WebView generation', async () => {
+    await mount()
+    await ready()
+    await act(async () => {
+      connection.accept({ id: 'http://second.test:3080', url: 'http://second.test:3080', host: 'second.test', port: 3080 })
+    })
+    await message({ type: 'dsh://theme-state', theme: 'dark' })
+    expect(native.setTheme).not.toHaveBeenCalled()
   })
 
   it('gives scanner focus and an open drawer first refusal before consuming Android back for WebView history', async () => {

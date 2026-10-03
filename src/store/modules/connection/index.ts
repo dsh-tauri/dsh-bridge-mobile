@@ -71,7 +71,7 @@ export function createConnectionStore() {
   return defineStore({
     state: (): ConnectionState => ({
       hydrated: false,
-      stage: 'scanning',
+      stage: 'idle',
       current: null,
       history: [],
       tokens: {},
@@ -167,6 +167,8 @@ export function createConnectionStore() {
         this.health[this.current.id] = 'unavailable'
       },
       dismissHint() {
+        if (!this.swipeHintVisible)
+          return
         if (this.current && !this.guidedHosts.includes(this.current.id))
           this.guidedHosts.push(this.current.id)
         this.swipeHintVisible = false

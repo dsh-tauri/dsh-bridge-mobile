@@ -51,6 +51,7 @@ interface BrowserWindow {
     sessions?: { open: (sessionId: string) => void }
   }
   addEventListener: (type: string, listener: EventListener, options?: AddEventListenerOptions) => void
+  removeEventListener: (type: string, listener: EventListener, options?: EventListenerOptions) => void
   dispatchEvent: (event: Event) => boolean
 }
 
@@ -67,7 +68,23 @@ class BrowserMessageEvent extends Event {
   }
 }
 
-function createBrowser(options: { locationOrigin?: string, topFrame?: boolean, hidden?: boolean, nodes?: SessionNode[], readyState?: 'loading' | 'complete', login?: boolean } = {}) {
+function browserElement() {
+  const attributes = new Map<string, string>()
+  return {
+    getAttribute: (name: string) => attributes.get(name) ?? null,
+    hasAttribute: (name: string) => attributes.has(name),
+    setAttribute: (name: string, value: string) => attributes.set(name, value),
+    removeAttribute: (name: string) => attributes.delete(name),
+  }
+}
+
+interface BrowserStyle {
+  id: string
+  textContent: string
+  remove: () => void
+}
+
+function createBrowser(options: { locationOrigin?: string, topFrame?: boolean, hidden?: boolean, nodes?: SessionNode[], readyState?: 'loading' | 'complete', login?: boolean, rootAvailable?: boolean } = {}) {
   const posts = vi.fn<(message: string) => void>()
   const windowEvents = new EventTarget()
   const documentEvents = new EventTarget()
@@ -75,19 +92,53 @@ function createBrowser(options: { locationOrigin?: string, topFrame?: boolean, h
     top: null,
     ReactNativeWebView: { postMessage: posts },
     addEventListener: vi.fn((type: string, listener: EventListener, options?: AddEventListenerOptions) => windowEvents.addEventListener(type, listener, options)),
+    removeEventListener: vi.fn((type: string, listener: EventListener, options?: EventListenerOptions) => windowEvents.removeEventListener(type, listener, options)),
     dispatchEvent: vi.fn((event: Event) => windowEvents.dispatchEvent(event)),
   }
   window.top = options.topFrame === false ? {} : window
+  const styles = new Map<string, BrowserStyle>()
+  const appendChild = vi.fn((style: BrowserStyle) => {
+    styles.set(style.id, style)
+  })
+  const documentElement = { ...browserElement(), appendChild }
+  const body = browserElement()
+  const mutations: Array<{ callback: () => void, observe: ReturnType<typeof vi.fn>, disconnect: ReturnType<typeof vi.fn> }> = []
+  class BrowserMutationObserver {
+    callback: () => void
+    observe = vi.fn()
+    disconnect = vi.fn()
+
+    constructor(callback: () => void) {
+      this.callback = callback
+      mutations.push(this)
+    }
+  }
   const document = {
     hidden: options.hidden ?? false,
     visibilityState: options.hidden ? 'hidden' : 'visible',
     readyState: options.readyState ?? 'complete',
-    getElementById: vi.fn((id: string) => options.login && id === 'loginForm' ? {} : null),
+    documentElement: options.rootAvailable === false ? null : documentElement,
+    body: options.rootAvailable === false ? null : body,
+    head: options.rootAvailable === false ? null : { appendChild },
+    createElement: vi.fn((tag: string) => {
+      expect(tag).toBe('style')
+      const style: BrowserStyle = {
+        id: '',
+        textContent: '',
+        remove: () => {
+          styles.delete(style.id)
+        },
+      }
+      return style
+    }),
+    getElementById: vi.fn((id: string) => styles.get(id) ?? (options.login && id === 'loginForm' ? {} : null)),
     querySelectorAll: vi.fn<(selector: string) => SessionNode[]>().mockReturnValue(options.nodes ?? []),
+    addEventListener: vi.fn((type: string, listener: EventListener, eventOptions?: AddEventListenerOptions) => documentEvents.addEventListener(type, listener, eventOptions)),
+    removeEventListener: vi.fn((type: string, listener: EventListener, eventOptions?: EventListenerOptions) => documentEvents.removeEventListener(type, listener, eventOptions)),
     dispatchEvent: vi.fn((event: Event) => documentEvents.dispatchEvent(event)),
   }
   const location = { origin: options.locationOrigin ?? origin }
-  const context = createVmContext({ window, document, location, Event, MessageEvent: BrowserMessageEvent, Date, setTimeout, clearTimeout })
+  const context = createVmContext({ window, document, location, MutationObserver: BrowserMutationObserver, Event, MessageEvent: BrowserMessageEvent, Date, setTimeout, clearTimeout })
   function run(script: string): unknown {
     return runInContext(script, context, { timeout: 1000 })
   }
@@ -101,7 +152,7 @@ function createBrowser(options: { locationOrigin?: string, topFrame?: boolean, h
   function postMessage(data: unknown, eventOrigin = origin, source: unknown = window) {
     window.dispatchEvent(new BrowserMessageEvent('message', { data, origin: eventOrigin, source }))
   }
-  return { window, document, location, posts, run, inject, postMessage }
+  return { window, document, documentElement, body, styles, appendChild, mutations, location, posts, run, inject, postMessage }
 }
 
 function sessionNode(attributes: Record<string, string>): SessionNode {
@@ -216,6 +267,125 @@ describe('parseNativeMessage', () => {
 
     expect(parseNativeMessage(boundary, nativeUrl, origin, nonce)).toEqual(payload)
     expect(parseNativeMessage(`${boundary} `, nativeUrl, origin, nonce)).toBeNull()
+  })
+})
+
+describe('trusted WebView theme and touch styling', () => {
+  it.each(['light', 'dark', 'system'] as const)('accepts only the canonical theme source %s through authenticated IPC', (theme) => {
+    expect(parseNativeMessage(envelope({ type: 'dsh://theme-state', theme }), nativeUrl, origin, nonce)).toEqual({ type: 'dsh://theme-state', theme })
+    expect(parseNativeMessage(envelope({ type: 'dsh://theme-state', theme }), nativeUrl, origin, 'stale-nonce')).toBeNull()
+    expect(parseNativeMessage(envelope({ type: 'dsh://theme-state', theme }), 'https://foreign.test/', origin, nonce)).toBeNull()
+  })
+
+  it.each([undefined, null, 1, '', 'sepia', 'LIGHT', 'auto'])('rejects unsupported theme values %j', (theme) => {
+    expect(parseNativeMessage(envelope({ type: 'dsh://theme-state', theme }), nativeUrl, origin, nonce)).toBeNull()
+  })
+
+  it('installs only tap transparency, repairs a removed style, and preserves same-nonce bridge identity', () => {
+    const browser = createBrowser()
+    const Notification = browser.inject()
+    const receive = browser.window.__dshBridgeReceive
+    const style = browser.styles.get('dsh-bridge-tap-highlight')
+
+    expect(style?.textContent).toBe('* { -webkit-tap-highlight-color: transparent; }')
+    expect(browser.styles.size).toBe(1)
+    expect(browser.document.createElement).toHaveBeenCalledExactlyOnceWith('style')
+    expect(browser.inject()).toBe(Notification)
+    expect(browser.window.__dshBridgeReceive).toBe(receive)
+    expect(browser.styles.size).toBe(1)
+    expect(browser.document.createElement).toHaveBeenCalledTimes(1)
+    style?.remove()
+    expect(browser.styles.size).toBe(0)
+    browser.inject()
+    expect(browser.styles.get('dsh-bridge-tap-highlight')?.textContent).toBe('* { -webkit-tap-highlight-color: transparent; }')
+    expect(browser.document.createElement).toHaveBeenCalledTimes(2)
+    expect(browser.window.__dshBridgeReceive).toBe(receive)
+    expect(browser.posts).not.toHaveBeenCalled()
+  })
+
+  it('defers touch styling until the root exists when injected before HTML content', () => {
+    const browser = createBrowser({ rootAvailable: false, readyState: 'loading' })
+    browser.inject()
+    expect(browser.styles.size).toBe(0)
+    expect(browser.document.createElement).not.toHaveBeenCalled()
+    browser.document.documentElement = browser.documentElement
+    browser.document.head = { appendChild: browser.appendChild }
+    browser.document.body = browser.body
+    browser.document.dispatchEvent(new Event('DOMContentLoaded'))
+    browser.document.dispatchEvent(new Event('DOMContentLoaded'))
+
+    expect(browser.styles.get('dsh-bridge-tap-highlight')?.textContent).toBe('* { -webkit-tap-highlight-color: transparent; }')
+    expect(browser.styles.size).toBe(1)
+    expect(browser.document.createElement).toHaveBeenCalledExactlyOnceWith('style')
+  })
+
+  it.each([{ locationOrigin: 'https://evil.test:3080' }, { topFrame: false }])('does not style or observe an untrusted document %j', (options) => {
+    const browser = createBrowser(options)
+    browser.documentElement.setAttribute('data-ds-theme-source', 'light')
+    browser.window.__DSH_BOOT__ = {}
+    browser.run(createNotificationShim(origin, nonce))
+
+    expect(browser.styles.size).toBe(0)
+    expect(browser.document.createElement).not.toHaveBeenCalled()
+    expect(browser.mutations).toEqual([])
+    expect(browser.posts).not.toHaveBeenCalled()
+  })
+
+  it('mirrors the DSH-owned theme source only after readiness and follows mutations without duplicate observers or messages', () => {
+    const browser = createBrowser({ readyState: 'loading' })
+    browser.window.__DSH_BOOT__ = {}
+    browser.documentElement.setAttribute('data-ds-theme-source', 'light')
+    browser.inject()
+    expect(browser.posts).not.toHaveBeenCalled()
+    browser.document.readyState = 'complete'
+    browser.window.dispatchEvent(new Event('load'))
+
+    expect(browser.posts.mock.calls.map(([raw]) => parseNativeMessage(raw, nativeUrl, origin, nonce))).toEqual([
+      { type: 'dsh://bridge-ready' },
+      { type: 'dsh://theme-state', theme: 'light' },
+    ])
+    expect(browser.mutations).toHaveLength(1)
+    expect(browser.mutations[0]!.observe).toHaveBeenCalledWith(browser.documentElement, { attributes: true, attributeFilter: ['data-ds-theme-source'] })
+    browser.inject()
+    browser.mutations[0]!.callback()
+    expect(browser.posts).toHaveBeenCalledTimes(2)
+    browser.documentElement.setAttribute('data-ds-theme-source', 'dark')
+    browser.mutations[0]!.callback()
+    browser.documentElement.setAttribute('data-ds-theme-source', 'system')
+    browser.mutations[0]!.callback()
+    expect(browser.posts.mock.calls.slice(2).map(([raw]) => parseNativeMessage(raw, nativeUrl, origin, nonce))).toEqual([
+      { type: 'dsh://theme-state', theme: 'dark' },
+      { type: 'dsh://theme-state', theme: 'system' },
+    ])
+    browser.window.dispatchEvent(new Event('pagehide'))
+    expect(browser.mutations[0]!.disconnect).toHaveBeenCalledTimes(1)
+  })
+
+  it('follows legacy DSH body palette changes when no native theme-source marker is exposed', () => {
+    const browser = createBrowser()
+    browser.window.__dshClientCtx = {}
+    browser.body.setAttribute('data-ds-dark-theme', '')
+    browser.inject()
+    expect(browser.posts.mock.calls.map(([raw]) => parseNativeMessage(raw, nativeUrl, origin, nonce))).toEqual([
+      { type: 'dsh://bridge-ready' },
+      { type: 'dsh://theme-state', theme: 'dark' },
+    ])
+    expect(browser.mutations).toHaveLength(1)
+    expect(browser.mutations[0]!.observe).toHaveBeenCalledWith(browser.body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
+    browser.body.removeAttribute('data-ds-dark-theme')
+    browser.mutations[0]!.callback()
+    expect(parseNativeMessage(browser.posts.mock.calls[2]![0], nativeUrl, origin, nonce)).toEqual({ type: 'dsh://theme-state', theme: 'light' })
+  })
+
+  it('does not infer a light theme from a marker-free login page or incomplete arbitrary HTML', () => {
+    const login = createBrowser({ login: true })
+    login.inject()
+    expect(login.posts.mock.calls.map(([raw]) => parseNativeMessage(raw, nativeUrl, origin, nonce))).toEqual([{ type: 'dsh://bridge-ready' }])
+    const unverified = createBrowser()
+    unverified.documentElement.setAttribute('data-ds-theme-source', 'light')
+    unverified.inject()
+    unverified.mutations[0]?.callback()
+    expect(unverified.posts).not.toHaveBeenCalled()
   })
 })
 
@@ -628,8 +798,10 @@ describe('authenticated document readiness', () => {
     browser.inject()
     browser.inject()
 
-    expect(browser.posts).toHaveBeenCalledTimes(1)
-    expect(parseNativeMessage(browser.posts.mock.calls[0]![0], nativeUrl, origin, nonce)).toEqual({ type: 'dsh://bridge-ready' })
+    const expected: Array<{ type: string, theme?: string }> = [{ type: 'dsh://bridge-ready' }]
+    if (kind !== 'login')
+      expected.push({ type: 'dsh://theme-state', theme: 'light' })
+    expect(browser.posts.mock.calls.map(([raw]) => parseNativeMessage(raw, nativeUrl, origin, nonce))).toEqual(expected)
   })
 
   it('rechecks a later DSH fingerprint on same-nonce reinjection without replacing the shim or sending readiness twice', () => {
@@ -642,8 +814,10 @@ describe('authenticated document readiness', () => {
     expect(browser.inject()).toBe(Notification)
     browser.inject()
 
-    expect(browser.posts).toHaveBeenCalledTimes(1)
-    expect(parseNativeMessage(browser.posts.mock.calls[0]![0], nativeUrl, origin, nonce)).toEqual({ type: 'dsh://bridge-ready' })
+    expect(browser.posts.mock.calls.map(([raw]) => parseNativeMessage(raw, nativeUrl, origin, nonce))).toEqual([
+      { type: 'dsh://bridge-ready' },
+      { type: 'dsh://theme-state', theme: 'light' },
+    ])
     expect(browser.window.addEventListener).toHaveBeenCalledTimes(listenerCount)
   })
 
@@ -657,8 +831,10 @@ describe('authenticated document readiness', () => {
     browser.window.dispatchEvent(new Event('load'))
     browser.inject()
 
-    expect(browser.posts).toHaveBeenCalledTimes(1)
-    expect(parseNativeMessage(browser.posts.mock.calls[0]![0], nativeUrl, origin, nonce)).toEqual({ type: 'dsh://bridge-ready' })
+    expect(browser.posts.mock.calls.map(([raw]) => parseNativeMessage(raw, nativeUrl, origin, nonce))).toEqual([
+      { type: 'dsh://bridge-ready' },
+      { type: 'dsh://theme-state', theme: 'light' },
+    ])
   })
 
   it('retries readiness when the native message endpoint was absent during the first verified injection', () => {
@@ -672,8 +848,10 @@ describe('authenticated document readiness', () => {
     expect(browser.inject()).toBe(Notification)
     browser.inject()
 
-    expect(browser.posts).toHaveBeenCalledTimes(1)
-    expect(parseNativeMessage(browser.posts.mock.calls[0]![0], nativeUrl, origin, nonce)).toEqual({ type: 'dsh://bridge-ready' })
+    expect(browser.posts.mock.calls.map(([raw]) => parseNativeMessage(raw, nativeUrl, origin, nonce))).toEqual([
+      { type: 'dsh://bridge-ready' },
+      { type: 'dsh://theme-state', theme: 'light' },
+    ])
   })
 
   it.each(['origin', 'frame'] as const)('still rejects reinjection when the current %s is no longer trusted', (boundary) => {
@@ -700,8 +878,10 @@ describe('authenticated document readiness', () => {
     browser.window.dispatchEvent(new Event('load'))
     browser.window.dispatchEvent(new Event('load'))
 
-    expect(browser.posts).toHaveBeenCalledTimes(1)
-    expect(parseNativeMessage(browser.posts.mock.calls[0]![0], nativeUrl, origin, nonce)).toEqual({ type: 'dsh://bridge-ready' })
+    expect(browser.posts.mock.calls.map(([raw]) => parseNativeMessage(raw, nativeUrl, origin, nonce))).toEqual([
+      { type: 'dsh://bridge-ready' },
+      { type: 'dsh://theme-state', theme: 'light' },
+    ])
   })
 })
 

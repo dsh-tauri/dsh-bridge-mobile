@@ -83,6 +83,7 @@ vi.mock('expo-router', async () => {
     Stack: Object.assign(Stack, { Screen: 'Screen' }),
   }
 })
+vi.mock('uniwind', () => ({ Uniwind: { setTheme: vi.fn() } }))
 vi.mock('expo-status-bar', () => ({ StatusBar: 'StatusBar' }))
 vi.mock('expo-camera', () => ({
   CameraView: 'CameraView',
@@ -105,12 +106,13 @@ vi.mock('heroui-native/button', async () => {
 })
 vi.mock('react-native-gesture-handler', () => ({ GestureHandlerRootView: 'GestureHandlerRootView' }))
 vi.mock('react-native-safe-area-context', () => ({ SafeAreaProvider: 'SafeAreaProvider', SafeAreaView: 'SafeAreaView' }))
-vi.mock('react-native-lucide', () => ({ History: 'Icon', Radar: 'Icon', ScanLine: 'Icon', RefreshCw: 'Icon', X: 'Icon', ArrowLeft: 'Icon', Hand: 'Icon', PanelRightOpen: 'Icon' }))
+vi.mock('react-native-lucide', () => ({ History: 'Icon', Radar: 'Icon', ScanLine: 'Icon', RefreshCw: 'Icon', X: 'Icon', ArrowLeft: 'Icon', Hand: 'Icon' }))
 vi.mock('react-native-svg', () => ({ default: 'Svg', Path: 'SvgPath', Rect: 'SvgRect', G: 'SvgGroup', Defs: 'SvgDefs', ClipPath: 'SvgClipPath' }))
 vi.mock('react-native', () => ({
   View: 'View',
   Text: 'Text',
   Image: 'Image',
+  Modal: 'Modal',
   ScrollView: 'ScrollView',
   Pressable: 'Pressable',
   Platform: { OS: 'android' },
@@ -239,7 +241,9 @@ function drawer() {
 }
 
 function webView() {
-  return root().find(node => String(node.type) === 'WebView')
+  const views = root().findAll(node => String(node.type) === 'WebView')
+  expect(views).toHaveLength(1)
+  return views[0]!
 }
 
 async function webViewInstance() {
@@ -405,7 +409,9 @@ describe('rendered root hydration', () => {
       { name: 'scan', options: { presentation: 'fullScreenModal' } },
     ])
     expect(drawer().props.swipeEnabled).toBe(false)
-    expect(texts()).toContain('扫描局域网端口中...')
+    for (const label of ['自动扫描局域网', '扫码连接', '最近连接'])
+      expect(button(label).props.isDisabled).toBe(true)
+    expect(root().findAll(node => node.props.accessibilityRole === 'progressbar')).toHaveLength(0)
     await act(async () => {
       await vi.advanceTimersByTimeAsync(15000)
     })
@@ -429,7 +435,7 @@ describe('rendered root hydration', () => {
 
     expect(drawer().props.swipeEnabled).toBe(true)
     expect(webView().props.source).toEqual({ uri: 'http://bridge.local:3080/tasks?auth=secure-token' })
-    expect(texts()).toContain('正在连接...')
+    expect(texts()).toContain('寻找可用连接')
     expect(native.read).toHaveBeenCalledExactlyOnceWith('dsh-bridge/connections')
     expect(native.getIpAddressAsync).not.toHaveBeenCalled()
     expect(native.write.mock.calls.length).toBeGreaterThan(0)
@@ -438,6 +444,117 @@ describe('rendered root hydration', () => {
       expect(JSON.parse(payload)).toEqual({ version: 1, history: [{ ...alpha, lastConnectedAt: 20 }], guidedHosts: [] })
       expect(payload).not.toContain('secure-token')
     }
+  })
+})
+
+describe('rendered root entry selection', () => {
+  it('offers connection methods on a first launch without probing or automatically scanning the LAN', async () => {
+    native.getIpAddressAsync.mockResolvedValue('192.168.1.50')
+    await mount()
+
+    expect(connection.hydrated).toBe(true)
+    expect(connection.stage).toBe('idle')
+    expect(connection.current).toBeNull()
+    expect(connection.history).toEqual([])
+    expect(connection.notice).toBeNull()
+    expect(root().findAll(node => String(node.type) === 'WebView')).toHaveLength(0)
+    expect(root().findAll(node => node.props.accessibilityRole === 'progressbar')).toHaveLength(0)
+    for (const label of ['自动扫描局域网', '扫码连接', '最近连接'])
+      expect(button(label).props.isDisabled).toBe(false)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30000)
+    })
+    await changeAppState('background')
+    await changeAppState('active')
+    expect(native.getIpAddressAsync).not.toHaveBeenCalled()
+    expect(native.fetch).not.toHaveBeenCalled()
+    expect(native.getPermissionsAsync).not.toHaveBeenCalled()
+    expect(native.requestPermissionsAsync).not.toHaveBeenCalled()
+  })
+
+  it('does not treat an unsupported or invalid stored history as permission to scan automatically', async () => {
+    native.read.mockResolvedValue(JSON.stringify({ version: 2, history: [{ ...alpha, lastConnectedAt: 20 }], guidedHosts: [] }))
+    await mount()
+
+    expect(connection.history).toEqual([])
+    expect(connection.stage).toBe('idle')
+    expect(button('自动扫描局域网').props.isDisabled).toBe(false)
+    expect(native.readToken).not.toHaveBeenCalled()
+    expect(native.getIpAddressAsync).not.toHaveBeenCalled()
+    expect(native.fetch).not.toHaveBeenCalled()
+  })
+
+  it('automatically searches saved history on re-entry and connects the available older entry without a LAN scan', async () => {
+    native.read.mockResolvedValue(JSON.stringify(snapshot))
+    const newest = Promise.withResolvers<Response>()
+    const older = Promise.withResolvers<Response>()
+    native.fetch.mockImplementation((input) => {
+      if (String(input).startsWith('http://bridge.local:3080/'))
+        return newest.promise
+      return older.promise
+    })
+    await mount()
+
+    expect(connection.stage).toBe('scanning')
+    expect(texts()).toContain('寻找可用连接')
+    expect(native.fetch.mock.calls.map(([url]) => url)).toEqual([
+      'http://bridge.local:3080/__dsh_bridge__/auth-status',
+      'https://second.local/__dsh_bridge__/auth-status',
+    ])
+    expect(native.getIpAddressAsync).not.toHaveBeenCalled()
+    await act(async () => {
+      older.resolve(Response.json({ enabled: false, allowLoopback: true }))
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(connection.current).toBeNull()
+    await act(async () => {
+      newest.resolve(new Response(null, { status: 503 }))
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect(connection.current).toEqual(beta)
+    expect(webView().props.source).toEqual({ uri: 'https://second.local/workspaces' })
+    expect(texts()).toContain('寻找可用连接')
+    expect(connection.history).toEqual(snapshot.history)
+    expect(native.getIpAddressAsync).not.toHaveBeenCalled()
+    await ready('https://second.local')
+    expect(texts()).not.toContain('寻找可用连接')
+  })
+
+  it('returns to method selection when all saved connections are unavailable instead of scanning the LAN', async () => {
+    native.read.mockResolvedValue(JSON.stringify(snapshot))
+    native.fetch.mockResolvedValue(new Response(null, { status: 503 }))
+    await mount()
+
+    expect(connection.stage).toBe('idle')
+    expect(connection.current).toBeNull()
+    expect(connection.history).toEqual(snapshot.history)
+    expect(connection.health).toEqual({ 'http://bridge.local:3080': 'unavailable', 'https://second.local': 'unavailable' })
+    expect(texts()).toContain('未找到可用的历史连接，请选择连接方式。')
+    expect(root().findAll(node => String(node.type) === 'WebView')).toHaveLength(0)
+    for (const label of ['自动扫描局域网', '扫码连接', '最近连接'])
+      expect(button(label).props.isDisabled).toBe(false)
+    expect(native.fetch).toHaveBeenCalledTimes(2)
+    expect(native.getIpAddressAsync).not.toHaveBeenCalled()
+    expect(native.requestPermissionsAsync).not.toHaveBeenCalled()
+  })
+
+  it('lets the user cancel history reconnection and open QR without a late result replacing the selection', async () => {
+    native.read.mockResolvedValue(JSON.stringify(snapshot))
+    holdNetwork()
+    await mount()
+    expect(texts()).toContain('寻找可用连接')
+    const signals = native.fetch.mock.calls.map(([, options]) => options!.signal!)
+
+    await press('取消')
+    expect(signals.every(signal => signal.aborted)).toBe(true)
+    expect(connection.stage).toBe('idle')
+    expect(connection.notice).toBeNull()
+    await press('扫码连接')
+    expect(texts()).toContain('扫码连接 DSH Bridge')
+    expect(connection.current).toBeNull()
+    expect(connection.history).toEqual(snapshot.history)
+    expect(native.getIpAddressAsync).not.toHaveBeenCalled()
   })
 })
 
@@ -477,7 +594,7 @@ describe('rendered root notification focus', () => {
     const instance = await webViewInstance()
     await ready('http://bridge.local:3080')
     expect(connection.pendingFocus?.sessionId).toBe('cold-session')
-    expect(texts()).not.toContain('正在连接...')
+    expect(texts()).not.toContain('寻找可用连接')
     expect(instance.injectJavaScript.mock.calls.map(([script]) => script).join('\n')).toContain('"type":"dsh://focus-session","requestId":"root-test-nonce","sessionId":"cold-session","title":"Answer complete","tag":"tag-cold-session"')
     await focusResult('http://bridge.local:3080')
     expect(connection.pendingFocus).toBeNull()
@@ -489,7 +606,9 @@ describe('rendered root notification focus', () => {
     runtime.connectAddress(beta)
     await mount()
     await ready('https://second.local')
-    await press('打开连接信息')
+    await act(async () => {
+      drawer().props.onOpen()
+    })
     await press('扫码连接')
     expect(texts()).toContain('扫码连接 DSH Bridge')
     const oldInstance = await webViewInstance()
@@ -501,12 +620,12 @@ describe('rendered root notification focus', () => {
     expect(texts()).not.toContain('扫码连接 DSH Bridge')
     expect(webView().props.source).toEqual({ uri: 'http://bridge.local:3080/tasks?auth=saved-secret' })
     expect(await webViewInstance()).not.toBe(oldInstance)
-    expect(texts()).toContain('正在连接...')
+    expect(texts()).toContain('寻找可用连接')
     expect(connection.pendingFocus?.sessionId).toBe('warm-session')
     const newInstance = await webViewInstance()
     await ready('http://bridge.local:3080')
     expect(connection.pendingFocus?.sessionId).toBe('warm-session')
-    expect(texts()).not.toContain('正在连接...')
+    expect(texts()).not.toContain('寻找可用连接')
     expect(newInstance.injectJavaScript.mock.calls.map(([script]) => script).join('\n')).toContain('"type":"dsh://focus-session","requestId":"root-test-nonce","sessionId":"warm-session","title":"Answer complete","tag":"tag-warm-session"')
     await focusResult('http://bridge.local:3080')
     expect(connection.pendingFocus).toBeNull()
@@ -520,7 +639,9 @@ describe('rendered root notification focus', () => {
     await ready('http://bridge.local:3080')
     const instance = await webViewInstance()
     const generation = connection.viewGeneration
-    await press('打开连接信息')
+    await act(async () => {
+      drawer().props.onOpen()
+    })
     await press('扫码连接')
     expect(root().findAll(node => String(node.type) === 'CameraView')).toHaveLength(1)
 
@@ -529,7 +650,7 @@ describe('rendered root notification focus', () => {
     expect(native.dismissTo).toHaveBeenCalledExactlyOnceWith('/')
     expect(root().findAll(node => String(node.type) === 'CameraView')).toHaveLength(0)
     expect(texts()).not.toContain('扫码连接 DSH Bridge')
-    expect(texts()).not.toContain('正在连接...')
+    expect(texts()).not.toContain('寻找可用连接')
     expect(drawer().props.open).toBe(false)
     expect(await webViewInstance()).toBe(instance)
     expect(connection.viewGeneration).toBe(generation)
@@ -589,7 +710,9 @@ describe('rendered root lifecycle resources', () => {
     runtime.connectAddress(alpha)
     await mount()
     await ready('http://bridge.local:3080')
-    await press('打开连接信息')
+    await act(async () => {
+      drawer().props.onOpen()
+    })
     native.fetch.mockClear()
 
     await changeAppState('background')
@@ -642,6 +765,8 @@ describe('rendered root lifecycle resources', () => {
     native.getIpAddressAsync.mockResolvedValue('192.168.1.50')
     holdNetwork()
     await mount()
+    expect(native.fetch).not.toHaveBeenCalled()
+    await press('自动扫描局域网')
     expect(texts()).toContain('扫描局域网端口中...')
     expect(native.fetch.mock.calls.length).toBeGreaterThan(0)
     const signals = native.fetch.mock.calls.map(([, options]) => options!.signal!)

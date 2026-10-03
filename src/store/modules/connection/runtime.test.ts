@@ -467,6 +467,86 @@ function describeDiscovery() {
   }
 }
 
+describe('history-only re-entry', () => {
+  it('preserves history ordering and saved tokens without reading the LAN address', async () => {
+    hydrate([recentAlpha, recentBeta], { 'http://10.0.0.20:4444': 'fixture-saved-token' })
+    boundary.probe.mockResolvedValueOnce(lockedHost({ ...alpha, token: 'fixture-saved-token' })).mockResolvedValueOnce(openHost(beta))
+
+    await runtime.startAutoScan({ historyOnly: true })
+
+    expect(recordedProbe()[0]).toEqual({ ...recentAlpha, token: 'fixture-saved-token' })
+    expect(recordedProbe(1)[0]).toEqual(recentBeta)
+    expect(connection.current).toEqual({ ...alpha, token: 'fixture-saved-token' })
+    expect(connection.history).toEqual([recentAlpha, recentBeta])
+    expect(boundary.ip).not.toHaveBeenCalled()
+    expect(boundary.scan).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('falls back within saved history rather than scanning new LAN hosts', async () => {
+    hydrate([recentAlpha, recentBeta])
+    boundary.probe.mockResolvedValueOnce(null).mockResolvedValueOnce(openHost(beta))
+
+    await runtime.startAutoScan({ historyOnly: true })
+
+    expect(connection.current).toEqual(beta)
+    expect(connection.health).toEqual({ 'http://10.0.0.20:4444': 'unavailable', 'http://10.0.0.2:3082': 'available' })
+    expect(connection.notice).toBeNull()
+    expect(boundary.ip).not.toHaveBeenCalled()
+    expect(boundary.scan).not.toHaveBeenCalled()
+  })
+
+  it('returns to method selection when there is no available history without starting a LAN scan', async () => {
+    hydrate([recentAlpha, recentBeta])
+
+    await runtime.startAutoScan({ historyOnly: true })
+
+    expect(connection.current).toBeNull()
+    expect(connection.stage).toBe('idle')
+    expect(connection.notice).toBe('未找到可用的历史连接，请选择连接方式。')
+    expect(connection.history).toEqual([recentAlpha, recentBeta])
+    expect(boundary.probe).toHaveBeenCalledTimes(2)
+    expect(boundary.ip).not.toHaveBeenCalled()
+    expect(boundary.scan).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('keeps unusable token-only history for QR login without silently searching the LAN', async () => {
+    hydrate([recentAlpha])
+    boundary.probe.mockResolvedValue(lockedHost(alpha))
+
+    await runtime.startAutoScan({ historyOnly: true })
+
+    expect(connection.current).toBeNull()
+    expect(connection.stage).toBe('idle')
+    expect(connection.notice).toBe(tokenRequired)
+    expect(connection.health[alpha.id]).toBe('available')
+    expect(connection.history).toEqual([recentAlpha])
+    expect(connection.tokens).toEqual({})
+    expect(boundary.ip).not.toHaveBeenCalled()
+    expect(boundary.scan).not.toHaveBeenCalled()
+  })
+
+  it('lets an explicit QR address cancel history reconnection and discard its late result', async () => {
+    hydrate([recentAlpha])
+    const probe = deferred<BridgeHost | null>(null)
+    boundary.probe.mockReturnValue(probe.promise)
+    const reconnecting = runtime.startAutoScan({ historyOnly: true })
+    const signal = recordedProbe()[1]
+
+    runtime.connectAddress(beta)
+    probe.resolve(openHost(alpha))
+    await reconnecting
+
+    expect(signal.aborted).toBe(true)
+    expect(connection.current).toEqual(beta)
+    expect(connection.notice).toBeNull()
+    expect(boundary.ip).not.toHaveBeenCalled()
+    expect(boundary.scan).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
 describe('runtime cancellation and scan generations', describeCancellation)
 
 function describeCancellation() {
